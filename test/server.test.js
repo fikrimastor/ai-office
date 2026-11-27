@@ -143,6 +143,33 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
       assert.deepStrictEqual(JSON.parse(read('office.json')).addons['invois-online'].always, []);
     });
 
+    await test('plan: yes task: the plan waits in Needs your OK, Approve runs the work, a stale plan cannot be decided', async () => {
+      const until = (fn, ms = 15000) => new Promise((res, rej) => { const t0 = Date.now(); const t = setInterval(() => { if (fn()) { clearInterval(t); res(); } else if (Date.now() - t0 > ms) { clearInterval(t); rej(new Error('timeout')); } }, 50); });
+      const put = (id, text) => fs.writeFileSync(path.join(dir, 'tasks', `${id}.md`), `---\nstaff: nurul\nplan: yes\nstatus: new\n---\n${text}\n`);
+      const planOf = async (id) => (await req('GET', '/api/approvals')).body.find((x) => x.task === id);
+      put('plan1', 'Big invoice clean up');
+      await until(() => /^status: plan-ready$/m.test(read('tasks/plan1.md')));
+      const a = await planOf('plan1');
+      assert.deepStrictEqual([a.kind, a.from, a.status, a.action], ['plan', 'nurul', 'pending', 'Plan: Big invoice clean up']);
+      assert.match(read('tasks/plan1.md'), new RegExp(`^approval: ${a.id}$`, 'm'));
+      assert.strictEqual((await req('POST', `/api/approvals/${a.id}/decide`, { decision: 'approved' })).status, 200);
+      await until(() => /^status: done$/m.test(read('tasks/plan1.md')));
+      assert.match(read('tasks/plan1.md'), /^plan: approved$/m);
+      put('plan2', 'Another big job');
+      await until(() => /^status: plan-ready$/m.test(read('tasks/plan2.md')));
+      const b = await planOf('plan2');
+      assert.strictEqual((await req('POST', '/api/tasks/plan2/stop')).status, 200);
+      assert.strictEqual((await planOf('plan2')).status, 'rejected', 'Stop closes its approval item');
+      assert.strictEqual((await req('POST', `/api/approvals/${b.id}/decide`, { decision: 'approved' })).status, 409);
+      put('plan3', 'Third big job');
+      await until(() => /^status: plan-ready$/m.test(read('tasks/plan3.md')));
+      const c = await planOf('plan3');
+      fs.writeFileSync(path.join(dir, 'tasks/plan3.md'), read('tasks/plan3.md').replace('status: plan-ready', 'status: stopped'));
+      const r = await req('POST', `/api/approvals/${c.id}/decide`, { decision: 'approved' });
+      assert.strictEqual(r.status, 409, 'the task moved on'); assert.match(r.body.error, /no longer waiting/);
+      assert.strictEqual((await planOf('plan3')).status, 'pending', 'nothing decided');
+    });
+
     await test('clean up: needs CLEAR, clears only what was picked, never the staff setup', async () => {
       await new Promise((res) => setTimeout(res, 800)); // the PA's short briefing after the approval ends first
       fs.writeFileSync(path.join(dir, 'staff/siti/quote.md'), 'x');

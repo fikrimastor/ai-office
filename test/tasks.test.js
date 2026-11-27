@@ -16,7 +16,8 @@ fs.appendFileSync(${JSON.stringify(path.join(tmp, 'calls.jsonl'))}, JSON.stringi
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const wait = msg.includes('LONG') ? 2500 : 400;
 setTimeout(() => {
-  out({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Done: ' + msg.split('\\n')[2] }] } });
+  const plan = msg.includes('Make a plan only') ? '1. Read the files\\n2. Write the quote\\n## Risky bit' : '';
+  out({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: plan || 'Done: ' + msg.split('\\n')[2] }] } });
   out({ type: 'result', subtype: 'success', is_error: false });
 }, wait);
 `;
@@ -36,11 +37,12 @@ const { access, chatEnv, resolveClaude } = require('../lib/chat');
 const dir = path.join(tmp, 'office');
 G.writeOffice(dir, G.buildConfig({ company: 'Kedai Ali', pa: 'Hana', staff: D.STAFF.slice(0, 3).map(({ name, role, job }) => ({ name, role, job })) }));
 
-const started = [], ended = [];
+const started = [], ended = [], plans = [], drops = [];
 const tasks = new Tasks(dir, {
   access: (id, o) => access(dir, id, o), claude: resolveClaude, env: chatEnv,
   loadCfg: () => JSON.parse(fs.readFileSync(path.join(dir, 'office.json'), 'utf8')),
   onStart: (t) => started.push(t.id), onEnd: (t, r) => ended.push([t.id, t.status, r]),
+  onPlan: (t, plan) => { plans.push([t.id, plan]); return `ap-${t.id}-${plans.length}`; }, onPlanDrop: (t) => drops.push(t.id),
 });
 const put = (id, staff, text) => fs.writeFileSync(path.join(dir, 'tasks', `${id}.md`), `---\nstaff: ${staff}\nproject:\nstatus: new\n---\n${text}\n`);
 const until = (fn, ms = 15000) => new Promise((res, rej) => { const t0 = Date.now(); const t = setInterval(() => { if (fn()) { clearInterval(t); res(); } else if (Date.now() - t0 > ms) { clearInterval(t); rej(new Error('timeout')); } }, 50); });
@@ -195,6 +197,95 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     assert.strictEqual(tasks.read('s2').result, 'Cancelled by the boss before it started.');
     await until(() => tasks.read('s1').status === 'done');
     assert.strictEqual(tasks.read('s2').status, 'stopped', 'not started after the quote is done');
+  });
+
+  const putPlan = (id, staff, text, after) => fs.writeFileSync(path.join(dir, 'tasks', `${id}.md`), `---\nstaff: ${staff}\nplan: yes\n${after ? `after: ${after}\n` : ''}status: new\n---\n${text}\n`);
+  const prompt = (c) => c.args[c.args.indexOf('-p') + 1];
+  const callFor = (word, plan) => calls().filter((x) => prompt(x).includes(word) && prompt(x).includes('Make a plan only') === plan).pop();
+
+  await test('plan: yes first runs read-only, stores the plan and asks the boss; dependents keep waiting', async () => {
+    putPlan('p1', 'siti', 'Plan quote for Kedai Ali');
+    putAfter('p2', 'nurul', 'p1', 'invoice after the planned quote');
+    tasks.scan();
+    await until(() => tasks.read('p1').status === 'plan-ready');
+    const t = tasks.read('p1');
+    assert.strictEqual(t.task, 'Plan quote for Kedai Ali', 'the plan is not part of the task');
+    assert.match(t.planText, /^1\. Read the files\n2\. Write the quote\n### Risky bit$/, 'stored under ## Plan, headings made smaller');
+    assert.strictEqual(t.approval, 'ap-p1-1');
+    assert.deepStrictEqual(plans.map(([id]) => id), ['p1'], 'one approval item');
+    assert.ok(!ended.some(([id]) => id === 'p1'), 'a plan is not the end of the task');
+    const c = callFor('Plan quote for Kedai Ali', true);
+    assert.strictEqual(c.args[c.args.indexOf('--tools') + 1], 'Read,Glob,Grep');
+    assert.ok(c.args[c.args.indexOf('--allowedTools') + 1].split(',').filter(Boolean).every((x) => /^(Read|Glob|Grep)(\(|$)/.test(x)), 'only read tools allowed');
+    assert.ok(c.args.includes('--strict-mcp-config') && !c.args.includes('--mcp-config'), 'no add-on tools while planning');
+    assert.strictEqual(tasks.read('p2').status, 'new');
+    assert.strictEqual(tasks.list().find((x) => x.id === 'p2').waiting, true, 'waits for done, not plan-ready');
+    assert.deepStrictEqual(tasks.recover(), [], 'a plan waiting for the boss survives a restart');
+    assert.strictEqual(tasks.read('p1').status, 'plan-ready');
+  });
+
+  await test('Approve: the staff does the work with the approved plan; dependents start after done', async () => {
+    assert.throws(() => tasks.decidePlan('p1', 'ap-other', 'approved'), (e) => e.status === 409, 'only its own approval');
+    assert.deepStrictEqual(tasks.decidePlan('p1', 'ap-p1-1', 'approved'), { ok: true, status: 'working' });
+    await until(() => tasks.read('p2').status === 'done');
+    assert.strictEqual(tasks.read('p1').status, 'done');
+    const c = callFor('Plan quote for Kedai Ali', false);
+    assert.ok(prompt(c).includes('The boss approved this plan. Follow it:\n1. Read the files'), 'plan in the prompt');
+    assert.ok(c.args[c.args.indexOf('--tools') + 1].includes('Write'), 'real run can write');
+    assert.ok(Date.parse(tasks.read('p2').started) >= Date.parse(tasks.read('p1').finished));
+    assert.throws(() => tasks.decidePlan('p1', 'ap-p1-1', 'approved'), (e) => e.status === 409, 'decided once');
+  });
+
+  await test('Reject with a note: a new plan with the note; after 3 re-plans the task stops', async () => {
+    putPlan('p3', 'aina', 'Plan reply to Ali');
+    tasks.scan();
+    await until(() => tasks.read('p3').status === 'plan-ready');
+    for (let i = 1; i <= 3; i++) {
+      const ap = tasks.read('p3').approval;
+      assert.deepStrictEqual(tasks.decidePlan('p3', ap, 'rejected', `Use RM20\nplease ${i}`), { ok: true, status: 'planning' });
+      await until(() => tasks.read('p3').status === 'plan-ready' && tasks.read('p3').approval !== ap);
+      const c = callFor('Plan reply to Ali', true);
+      assert.ok(prompt(c).includes(`The boss said: Use RM20 please ${i}`), 'the note is in the new plan run');
+      assert.ok(prompt(c).includes('Your last plan:\n1. Read the files'));
+      assert.strictEqual(c.args[c.args.indexOf('--tools') + 1], 'Read,Glob,Grep');
+      assert.strictEqual(tasks.read('p3').replans, String(i));
+    }
+    assert.strictEqual(tasks.decidePlan('p3', tasks.read('p3').approval, 'rejected', 'Still wrong').status, 'stopped');
+    assert.strictEqual(tasks.read('p3').status, 'stopped');
+    assert.match(tasks.read('p3').result, /sent the plan back 3 times/);
+    assert.ok(!calls().some((x) => prompt(x).includes('Plan reply to Ali') && !prompt(x).includes('Make a plan only')), 'never did the work');
+  });
+
+  await test('Reject with no note stops the task; tasks waiting for it fail', async () => {
+    putPlan('p4', 'siti', 'Plan discount');
+    putAfter('p5', 'nurul', 'p4', 'invoice with discount');
+    tasks.scan();
+    await until(() => tasks.read('p4').status === 'plan-ready');
+    assert.strictEqual(tasks.decidePlan('p4', tasks.read('p4').approval, 'rejected', '  ').status, 'stopped');
+    assert.match(tasks.read('p4').result, /rejected the plan/);
+    assert.ok(ended.some(([id, st]) => id === 'p4' && st === 'stopped'));
+    assert.strictEqual(tasks.read('p5').status, 'failed');
+  });
+
+  await test('Stop works while planning and while the plan waits; restart stops a planning task', async () => {
+    putPlan('p6', 'siti', 'LONG plan for the big job');
+    tasks.scan();
+    await until(() => tasks.read('p6').status === 'planning' && tasks.active().some((a) => a.id === 'p6'));
+    tasks.stop('p6');
+    await until(() => tasks.read('p6').status === 'stopped');
+    putPlan('p7', 'siti', 'Plan for the waiting job');
+    tasks.scan();
+    await until(() => tasks.read('p7').status === 'plan-ready');
+    assert.deepStrictEqual(tasks.stop('p7'), { ok: true });
+    assert.strictEqual(tasks.read('p7').status, 'stopped');
+    assert.deepStrictEqual(drops, ['p7'], 'its approval item is closed');
+    putPlan('p8', 'aina', 'cut while planning');
+    fs.writeFileSync(path.join(dir, 'tasks', 'p8.md'), fs.readFileSync(path.join(dir, 'tasks', 'p8.md'), 'utf8').replace('status: new', 'status: planning'));
+    assert.deepStrictEqual(tasks.recover().map((t) => t.id), ['p8']);
+    assert.strictEqual(tasks.read('p8').status, 'stopped');
+    const again = tasks.read(tasks.rerun('p8').id);
+    assert.strictEqual(again.plan, 'yes', 'run again: plans first again');
+    await until(() => tasks.read(again.id).status === 'plan-ready');
   });
 
   fs.rmSync(tmp, { recursive: true, force: true });

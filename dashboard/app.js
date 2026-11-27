@@ -344,7 +344,8 @@ function okItem(a) {
   const done = a.status !== 'pending';
   return `<div class="oki ${done ? 'done' : ''}">
     <div class="okh2">${who ? av(who) : ''}<b>${esc(who ? who.name : a.from)}</b><span class="faint">${when(a.created)}</span>${a.project ? `<span class="proj">${esc(a.project)}</span>` : ''}</div>
-    <div class="okq">${esc(a.action)}</div>${a.details ? `<div class="okc">${esc(a.details)}</div>` : ''}
+    <div class="okq">${esc(a.action)}</div>${a.details ? `<div class="okc${a.kind === 'plan' ? ' plan' : ''}">${esc(a.details)}</div>` : ''}
+    ${a.kind === 'plan' && !done ? `<div class="okc faint">If you approve, ${esc(who ? who.name : a.from)} does the work with this plan. To get a new plan, write what to change, then Reject. Reject with no note stops the task.</div><textarea class="in oknote" data-note rows="2" placeholder="What to change (optional)"></textarea>` : ''}
     ${a.tool ? `<div class="okc faint">${done ? '' : `If you approve, ${esc(who ? who.name : a.from)} does it right away. `}Exact action: <span class="mono">${esc(a.tool)} ${esc(a.input || '')}</span></div>` : ''}
     ${done ? `<div class="okdone ${a.status}">${icon(a.status === 'approved' ? 'check' : 'x')}${a.status === 'approved' ? 'Approved' : 'Rejected'} ${when(a.decided)}${a.used ? `, done ${when(a.used)}` : ''}</div>`
     : `<div class="okb"><button class="btn ok" data-ok="${esc(a.id)}" data-d="approved">${icon('check')}Approve</button><button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('x')}Reject</button>${who ? `<button class="btn ghost" style="margin-left:auto" data-ask="${esc(a.id)}">${icon('message-circle')}Ask</button>` : ''}</div>`}
@@ -925,7 +926,8 @@ let workMin = false, workPop = false;
 try { workMin = localStorage.getItem(WKEY) === '1'; } catch { /* private window: start open */ }
 const nameOfStaff = (id) => (personOf(id) || { name: id }).name;
 // tasks that wait for other tasks (after:), with what they wait for: "Waiting for Siti" or the task's title
-const waitingOf = (list = []) => list.filter((t) => t.waiting).map((t) => {
+const waitingOf = (list = []) => list.filter((t) => t.waiting || t.status === 'plan-ready').map((t) => {
+  if (t.status === 'plan-ready') return { ...t, waitFor: 'your OK on the plan' };
   const d = (t.after || []).map((a) => list.find((x) => x.id === a)).find((x) => x && x.status !== 'done');
   return { ...t, waitFor: d ? (d.status === 'working' ? nameOfStaff(d.staff) : d.title || d.id) : '' };
 });
@@ -934,7 +936,7 @@ function workLine(work) {
   if (!work.length) return '';
   if (work.length === 1) {
     const t = work[0];
-    return `<div class="wstrip work one" data-task="${esc(t.id)}">${icon('clock')}<div class="sq"><b>${esc(nameOfStaff(t.staff))}:</b> ${esc(t.title || t.id)}<span class="now">${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+    return `<div class="wstrip work one" data-task="${esc(t.id)}">${icon('clock')}<div class="sq"><b>${esc(nameOfStaff(t.staff))}:</b> ${esc(t.title || t.id)}<span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
   }
   return `<div class="wstrip work one link" data-work="open" role="button" tabindex="0">${icon('clock')}<div class="sq"><b>${work.length} staff working:</b> ${esc(work.map((t) => nameOfStaff(t.staff)).join(', '))}</div><span class="more">Show</span></div>`;
 }
@@ -954,7 +956,7 @@ function renderWork() {
   redraw(el, `<div class="wkh" data-work="${office ? 'fold' : 'close'}" role="button" tabindex="0" aria-expanded="${open}" title="${office ? (open ? 'Fold' : 'Show the list') : 'Close'}"><i class="d ${work.length ? 'working' : 'waiting'}"></i><b>${label}</b><span class="heads">${heads}</span>${icon(office ? 'chevron-down' : 'x')}</div>`
     + (open ? `<div class="wkl">${work.map((t) => {
       const p = personOf(t.staff) || { name: t.staff }, asked = t.from && t.from !== 'pa' && t.from !== t.staff ? personOf(t.from) : null;
-      return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+      return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${wait.map((t) => {
       const p = personOf(t.staff) || { name: t.staff };
       return `<div class="wk wait" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
@@ -1044,7 +1046,8 @@ document.addEventListener('click', (e) => {
   }
   else if (t.dataset.ok) {
     t.disabled = true;
-    act(() => api(`approvals/${encodeURIComponent(t.dataset.ok)}/decide`, 'POST', { decision: t.dataset.d }), t.dataset.d === 'approved' ? 'Approved. The staff will see it.' : 'Rejected.')
+    const note = (t.closest('.oki') && t.closest('.oki').querySelector('[data-note]') || {}).value || ''; // plan items: a note sends it back for a new plan
+    act(() => api(`approvals/${encodeURIComponent(t.dataset.ok)}/decide`, 'POST', { decision: t.dataset.d, ...(note.trim() ? { note: note.trim() } : {}) }), t.dataset.d === 'approved' ? 'Approved. The staff will see it.' : note.trim() ? 'Sent back for a new plan.' : 'Rejected.')
       .then(() => refresh(['approvals']), () => { t.disabled = false; });
   }
 });
