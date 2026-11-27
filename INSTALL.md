@@ -114,11 +114,11 @@ Without that tool, ask in plain text and number the choices.
 
 2. Run the installer with that file. If Node is not on PATH, put its folder first on PATH for this one command:
 
-   - Bash (also Git Bash on Windows): `PATH="<node folder>:$PATH" npx --yes github:epool86/ai-office --answers "<file>"`
-   - PowerShell: `$env:Path = "<node folder>;" + $env:Path; npx --yes github:epool86/ai-office --answers "<file>"`
+   - Bash (also Git Bash on Windows): `PATH="<node folder>:$PATH" npx --yes github:fikrimastor/ai-office --answers "<file>"`
+   - PowerShell: `$env:Path = "<node folder>;" + $env:Path; npx --yes github:fikrimastor/ai-office --answers "<file>"`
 
    `<node folder>` is the folder that holds `npx`: on Windows the folder with `node.exe`, on Mac and Linux its `bin` folder.
-   If Node is already on PATH, just run `npx --yes github:epool86/ai-office --answers "<file>"`.
+   If Node is already on PATH, just run `npx --yes github:fikrimastor/ai-office --answers "<file>"`.
 
 3. Lines starting with `✓` went well. A line starting with `✗` says what is wrong: fix it (for example pick another
    folder) and run again. Delete the answers file when done.

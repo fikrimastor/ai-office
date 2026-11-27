@@ -17,7 +17,7 @@ const value = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : 
 if (flag('--help') || flag('-h')) {
   console.log(`AI Office ${pkg.version}
 
-  npx github:epool86/ai-office            Set up a new office (wizard), or start the office
+  npx github:fikrimastor/ai-office            Set up a new office (wizard), or start the office
                                           when run inside an office folder
 Options:
   --dir <folder>    Office folder (default: ask)

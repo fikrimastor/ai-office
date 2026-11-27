@@ -1,6 +1,6 @@
 # AI Office
 
-Free public tool: `npx github:epool86/ai-office` runs a setup wizard, creates an office folder
+Free public tool: `npx github:fikrimastor/ai-office` runs a setup wizard, creates an office folder
 (a PA called Hana + 1 to 8 AI staff as Claude Code subagents), and starts a local dashboard at
 http://localhost:4747 (Office view, Talk to Hana, Needs your OK, Staff, Projects, Inbox).
 Users run it on their own Claude account through their own Claude Code.

@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/epool86/ai-office.git"
+    "url": "https://github.com/fikrimastor/ai-office.git"
   },
   "bin": {
     "ai-office": "bin/ai-office.js"

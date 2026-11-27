@@ -120,7 +120,7 @@ test('launcher: written once, refreshed only when it is ours', () => {
   assert.ok(fs.existsSync(f), 'setup wrote it');
   fs.rmSync(f);
   assert.strictEqual(G.writeLauncher(moved), name, 'first write');
-  assert.match(read(f), /AI Office launcher/); assert.match(read(f), /github:epool86\/ai-office/);
+  assert.match(read(f), /AI Office launcher/); assert.match(read(f), /github:fikrimastor\/ai-office/);
   assert.strictEqual(G.writeLauncher(moved), null, 'unchanged');
   fs.writeFileSync(f, 'my own script');
   assert.strictEqual(G.writeLauncher(moved), null, 'user file kept');
