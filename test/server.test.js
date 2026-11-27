@@ -22,6 +22,9 @@ process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
 const dir = path.join(tmp, 'office');
 const cfg = G.buildConfig({ company: 'Kedai Ali', pa: 'Hana', staff: D.STAFF.slice(0, 3).map(({ name, role, job }) => ({ name, role, job })) });
 G.writeOffice(dir, cfg);
+{ // the old behaviour: the boss decides plans (the manager deciding: proxy.test.js)
+  const f = path.join(dir, 'office.json'), c = JSON.parse(fs.readFileSync(f, 'utf8')); c.pa.planApprover = 'boss'; fs.writeFileSync(f, JSON.stringify(c, null, 2));
+}
 const read = (...p) => fs.readFileSync(path.join(dir, ...p), 'utf8');
 
 let port;

@@ -213,9 +213,9 @@ const test = async (name, fn) => { try { await fn(); n++; console.log(`ok ${n} $
 
   await test('E9 mail stays unread when the run fails', async () => {
     fs.mkdirSync(path.join(dir, 'mail', 'ali'), { recursive: true });
-    const m = path.join(dir, 'mail', 'ali', '20261128-101500-siti.md');
-    fs.writeFileSync(m, '---\nfrom: siti\nto: ali\nstatus: unread\n---\nKedai Ali wants English.\n');
-    fs.writeFileSync(path.join(dir, '.office', 'events.jsonl'), JSON.stringify({ ev: 'PreToolUse', tool: 'Write', file: m, who: 'siti' }) + '\n');
+    const m = path.join(dir, 'mail', 'ali', '20261128-101500-pa.md');
+    fs.writeFileSync(m, '---\nfrom: pa\nto: ali\nstatus: unread\n---\nKedai Ali wants English.\n');
+    fs.writeFileSync(path.join(dir, '.office', 'events.jsonl'), JSON.stringify({ ev: 'PreToolUse', tool: 'Write', file: m, who: 'pa' }) + '\n');
     put('e9', 'staff: ali\n', 'E9 ERRRUN invoice');
     tasks.scan(); await until(() => st('e9') === 'failed');
     assert.strictEqual(md.parse(fs.readFileSync(m, 'utf8')).fields.status, 'unread');

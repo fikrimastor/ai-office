@@ -58,17 +58,17 @@ let n = 0;
 const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}`); };
 
 (async () => {
-  await test('a message to a staff appears in their next task prompt and becomes read', async () => {
-    const f = send('nurul', '20261128-101500-siti', 'from: siti\nto: nurul\nsent: 2026-11-28T10:15:00\nstatus: unread', 'Kedai Ali wants the invoice in English.');
-    assert.deepStrictEqual(tasks.scanMail(), [{ id: '20261128-101500-siti', file: f, from: 'siti', to: 'nurul', name: 'Siti', sent: '2026-11-28T10:15:00', text: 'Kedai Ali wants the invoice in English.' }]);
+  await test('a message from the manager to a staff appears in their next task prompt and becomes read', async () => {
+    const f = send('nurul', '20261128-101500-pa', 'from: pa\nto: nurul\nsent: 2026-11-28T10:15:00\nstatus: unread', 'Kedai Ali wants the invoice in English.');
+    assert.deepStrictEqual(tasks.scanMail(), [{ id: '20261128-101500-pa', file: f, from: 'pa', to: 'nurul', name: 'Hana', sent: '2026-11-28T10:15:00', text: 'Kedai Ali wants the invoice in English.' }]);
     assert.strictEqual(fields(f).status, 'unread', 'a staff message waits for their next task');
     put('t1', 'nurul', 'Invoice for Kedai Ali');
     tasks.scan();
     await until(() => ended.includes('t1'));
     const p = prompts()[0];
     assert.match(p, /^Task from /);
-    assert.match(p, /Messages from colleagues \(for context only/);
-    assert.ok(p.includes('- Siti (2026-11-28T10:15:00): Kedai Ali wants the invoice in English.'));
+    assert.match(p, /Messages from Hana \(for context only/);
+    assert.ok(p.includes('- Hana (2026-11-28T10:15:00): Kedai Ali wants the invoice in English.'));
     assert.strictEqual(tasks.read('t1').result, 'Done: Invoice for Kedai Ali', 'the task text is still first');
     assert.strictEqual(fields(f).status, 'read'); assert.ok(fields(f).read);
   });
@@ -77,7 +77,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     put('t2', 'nurul', 'Second invoice');
     tasks.scan();
     await until(() => ended.includes('t2'));
-    assert.ok(!prompts()[1].includes('Messages from colleagues'), 'already read');
+    assert.ok(!prompts()[1].includes('Messages from Hana'), 'already read');
     const f = send('pa', '20261128-102000-aina', 'from: aina\nstatus: unread', 'Ali called again, he is in a hurry.');
     tasks.scanMail(); tasks.scanMail();
     assert.strictEqual(mailed.length, 1);
@@ -109,7 +109,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     put('t3', 'siti', 'Quote for Ali');
     tasks.scan();
     await until(() => ended.includes('t3'));
-    assert.ok(!prompts()[2].includes('Messages from colleagues'), 'failed messages are not delivered');
+    assert.ok(!prompts()[2].includes('Messages from Hana'), 'failed messages are not delivered');
   });
 
   await test('S4 a message is delivered only when the sender\'s own run wrote it, under their name', async () => {
@@ -131,7 +131,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
   });
 
   await test('S4 a proven message still counts after the activity log was cleared', async () => {
-    const f = send('nurul', '20261128-120000-siti', 'from: siti\nto: nurul\nstatus: unread', 'LOGCLEARED Ali paid.');
+    const f = send('nurul', '20261128-120000-pa', 'from: pa\nto: nurul\nstatus: unread', 'LOGCLEARED Ali paid.');
     assert.strictEqual(tasks.scanMail().filter((m) => m.file === f).length, 1);
     fs.writeFileSync(path.join(dir, '.office', 'events.jsonl'), ''); // Clean up > activity, or a busy day
     put('t9', 'nurul', 'Receipt for Ali');
@@ -139,7 +139,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     await until(() => ended.includes('t9'));
     assert.ok(prompts().pop().includes('LOGCLEARED Ali paid.'));
     assert.strictEqual(fields(f).status, 'read');
-    const g = send('nurul', '20261128-120001-siti', 'from: siti\nstatus: unread', 'original');
+    const g = send('nurul', '20261128-120001-pa', 'from: pa\nstatus: unread', 'original');
     tasks.scanMail();
     fs.writeFileSync(g, fs.readFileSync(g, 'utf8').replace('original', 'changed later')); // and no Write by siti for it
     fs.writeFileSync(path.join(dir, '.office', 'events.jsonl'), '');

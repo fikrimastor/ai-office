@@ -129,10 +129,11 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     assert.strictEqual(last.kind, 'error'); assert.match(last.text, /usage limit is reached/);
   });
 
-  await test('in a direct chat a staff may ask a colleague (with from: their id)', async () => {
+  await test('in a direct chat a staff asks a colleague only through the manager (a message to pa, for: their id)', async () => {
     const { access } = require('../lib/chat');
     const note = access(dir, 'siti').note;
-    assert.match(note, /from: siti/); assert.match(note, /Colleagues: aina \(Aina/);
+    assert.match(note, /from: siti, to: pa, for: <their staff id>/); assert.match(note, /Colleagues: aina \(Aina/);
+    assert.ok(note.includes(path.join(dir, 'mail', 'pa')) && !note.includes(path.join(dir, 'tasks')), 'no task files from a staff');
     assert.match(access(dir, 'siti', { task: true }).note, /cannot ask colleagues from here/);
   });
 

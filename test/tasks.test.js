@@ -78,15 +78,14 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     assert.ok(at('invoice two') - at('invoice one') >= 2000, 'nurul did her second task after the first');
   });
 
-  await test('a staff can ask a colleague; the answer is for whoever asked', async () => {
+  await test('a staff asking a colleague in a task file is not run: it is forwarded to the manager', async () => {
     fs.writeFileSync(path.join(dir, 'tasks', 'q1.md'), '---\nstaff: nurul\nfrom: siti\nstatus: new\n---\nAny problems with the invoices?\n');
     tasks.scan();
-    await until(() => ended.some(([id]) => id === 'q1'));
     const t = tasks.read('q1');
-    assert.strictEqual(t.status, 'done'); assert.strictEqual(t.from, 'siti');
-    const c = calls().find((x) => x.args[x.args.indexOf('-p') + 1].includes('Any problems'));
-    assert.match(c.args[c.args.indexOf('-p') + 1], /^Task from Siti/);
-    assert.match(c.args[c.args.indexOf('--append-system-prompt') + 1], /cannot ask colleagues from here/, 'no tasks from inside a task');
+    assert.strictEqual(t.status, 'forwarded'); assert.strictEqual(t.from, 'siti');
+    assert.ok(!calls().some((x) => x.args[x.args.indexOf('-p') + 1].includes('Any problems')), 'never run');
+    assert.ok(!ended.some(([id]) => id === 'q1'), 'not an end: the manager decides');
+    assert.match(access(dir, 'siti', { task: true }).note, /cannot ask colleagues from here/, 'no tasks from inside a task');
     fs.writeFileSync(path.join(dir, 'tasks', 'q2.md'), '---\nstaff: siti\nfrom: siti\nstatus: new\n---\nAsk myself\n');
     fs.writeFileSync(path.join(dir, 'tasks', 'q3.md'), '---\nstaff: siti\nfrom: ghost\nstatus: new\n---\nFrom nobody\n');
     tasks.scan();

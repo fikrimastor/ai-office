@@ -25,7 +25,10 @@ const G = require('../lib/generate');
 const { createServer } = require('../lib/server');
 const md = require('../lib/md');
 const dir = path.join(tmp, 'office');
-G.writeOffice(dir, G.buildConfig({ company: 'X', pa: 'Hana', staff: [{ name: 'Siti', role: 'Sales', job: 'x' }, { name: 'Nurul', role: 'Finance', job: 'x' }] }));
+// the boss decides plans here (the old behaviour; the manager deciding is tested in proxy.test.js)
+const base = G.buildConfig({ company: 'X', pa: 'Hana', staff: [{ name: 'Siti', role: 'Sales', job: 'x' }, { name: 'Nurul', role: 'Finance', job: 'x' }] });
+G.writeOffice(dir, base);
+{ const f = path.join(dir, 'office.json'), c = JSON.parse(fs.readFileSync(f, 'utf8')); c.pa.planApprover = 'boss'; fs.writeFileSync(f, JSON.stringify(c, null, 2)); }
 const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'office.json'), 'utf8'));
 const task = (id) => md.parse(fs.readFileSync(path.join(dir, 'tasks', `${id}.md`), 'utf8')).fields;
 const until = (fn, ms = 10000) => new Promise((res, rej) => { const t0 = Date.now(); const t = setInterval(() => { if (fn()) { clearInterval(t); res(); } else if (Date.now() - t0 > ms) { clearInterval(t); rej(new Error('timeout')); } }, 30); });

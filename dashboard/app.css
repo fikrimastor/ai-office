@@ -222,6 +222,14 @@ body.ok-open #okDrawer{transform:none}
 .okdone{display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:600;font-size:12px;color:var(--green)}
 .okdone.rejected{color:var(--red)}
 .okdone.sentback{color:var(--amber)}
+/* a plan the manager decides for the boss: dimmed, still clickable (the boss can decide first) */
+.oki.hana{opacity:.62;background:var(--line2)}
+.oki.hana:hover,.oki.hana:focus-within{opacity:1}
+.hanatag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:var(--rs);padding:0 6px}
+.hanatag svg.ic{width:11px;height:11px}
+.okc.esc{display:flex;align-items:center;gap:6px;color:var(--amber);font-weight:600}
+.okc.esc svg.ic{width:13px;height:13px;flex:none}
+.wstrip.hana{opacity:.7}
 .okempty{display:flex;align-items:center;gap:8px;padding:16px 14px;color:var(--muted)}
 
 /* settings */

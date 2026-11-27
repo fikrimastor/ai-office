@@ -333,9 +333,12 @@ function wireOffice() {
 
 // ------------------------------------------------------------------ approvals drawer
 const pendingOks = () => S.approvals.filter((a) => a.status === 'pending');
+// A plan the manager decides for the boss (approver: hana): shown dimmed, the boss can still decide first. Not counted.
+const hanaDeciding = (a) => a.status === 'pending' && a.kind === 'plan' && a.approver === 'hana';
+const bossOks = () => pendingOks().filter((a) => !hanaDeciding(a));
 function renderOkButton() {
   const b = $('#okStat'); if (!b) return;
-  const n = pendingOks().length;
+  const n = bossOks().length;
   b.className = `okbtn${S.okOpen ? ' on' : ''}${n ? '' : ' clear'}`;
   b.setAttribute('aria-label', n ? `${n} need your OK` : 'All clear'); // the label span hides at 639px and below
   b.innerHTML = n ? `${icon('hand')}<b>${n}</b><span class="oklbl"> need your OK</span>${icon(S.okOpen ? 'chevron-right' : 'chevron-left')}`
@@ -345,7 +348,8 @@ function renderOkButton() {
 const notes = {};
 // The boss's note on a decided item: a "Boss: ..." line the office adds (or a note field, if the API sends one).
 // "The task was stopped." is the office closing a plan whose task was stopped, not a note from the boss.
-const bossNote = (a) => { const n = a.note || ((String(a.details || '').match(/(?:^|\n)Boss: (.+)/) || [])[1] || ''); return n.trim() === 'The task was stopped.' ? '' : n.trim(); };
+const bossNote = (a) => { const n = a.note || ((String(a.details || '').match(/(?:^|\n)(?:Boss|Manager): (.+)/) || [])[1] || ''); return n.trim() === 'The task was stopped.' ? '' : n.trim(); };
+const byWhom = (a) => (a.decidedBy === 'hana' ? ` by ${pa().name}` : '');
 // Reject on a plan: with a note it sends the plan back; with no note it stops the task.
 const rejectBtn = (a) => (a.kind !== 'plan' ? `<button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('x')}Reject</button>`
   : (notes[a.id] || '').trim() ? `<button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('rotate-ccw')}Send back with note</button>`
@@ -353,13 +357,15 @@ const rejectBtn = (a) => (a.kind !== 'plan' ? `<button class="btn" data-ok="${es
 function okItem(a) {
   const who = staffById(a.from);
   const done = a.status !== 'pending';
-  const sentBack = a.kind === 'plan' && a.status === 'rejected' && bossNote(a);
-  return `<div class="oki ${done ? 'done' : ''}" data-oki="${esc(a.id)}">
-    <div class="okh2">${who ? av(who) : ''}<b>${esc(who ? who.name : a.from)}</b><span class="faint">${when(a.created)}</span>${a.project ? `<span class="proj">${esc(a.project)}</span>` : ''}</div>
+  const sentBack = a.kind === 'plan' && a.status === 'rejected' && bossNote(a), hana = hanaDeciding(a);
+  return `<div class="oki ${done ? 'done' : ''}${hana ? ' hana' : ''}" data-oki="${esc(a.id)}">
+    <div class="okh2">${who ? av(who) : ''}<b>${esc(who ? who.name : a.from)}</b><span class="faint">${when(a.created)}</span>${hana ? `<span class="hanatag">${icon('clock')}${esc(pa().name)} is deciding</span>` : ''}${a.project ? `<span class="proj">${esc(a.project)}</span>` : ''}</div>
+    ${a.escalated === 'yes' && !done ? `<div class="okc esc">${icon('hand')}${esc(pa().name)} passed this to you${a.escalateNote ? `: ${esc(a.escalateNote)}` : '.'}</div>` : ''}
     <div class="okq">${esc(a.action)}</div>${a.details ? `<div class="okc${a.kind === 'plan' ? ' plan' : ''}">${esc(a.details)}</div>` : ''}
+    ${hana ? `<div class="okc faint">${esc(pa().name)} decides this plan for you. You can still decide first: the first decision counts.</div>` : ''}
     ${a.kind === 'plan' && !done ? `<div class="okc faint">If you approve, ${esc(who ? who.name : a.from)} does the work with this plan. Want a new plan? Write what to change, then Send back. With no note, Reject stops the task.</div><textarea class="in oknote" data-note="${esc(a.id)}" rows="2" aria-label="What to change in this plan (optional)" placeholder="What to change (optional)">${esc(notes[a.id] || '')}</textarea>` : ''}
     ${a.tool ? `<div class="okc faint">${done ? '' : `If you approve, ${esc(who ? who.name : a.from)} does it right away. `}Exact action: <span class="mono">${esc(a.tool)} ${esc(a.input || '')}</span></div>` : ''}
-    ${done ? `<div class="okdone ${sentBack ? 'sentback' : a.status}">${icon(a.status === 'approved' ? 'check' : sentBack ? 'rotate-ccw' : 'x')}${a.status === 'approved' ? 'Approved' : sentBack ? 'Sent back for a new plan' : 'Rejected'} ${when(a.decided)}${a.used ? `, done ${when(a.used)}` : ''}</div>`
+    ${done ? `<div class="okdone ${sentBack ? 'sentback' : a.status}">${icon(a.status === 'approved' ? 'check' : sentBack ? 'rotate-ccw' : 'x')}${a.status === 'approved' ? 'Approved' : sentBack ? 'Sent back for a new plan' : 'Rejected'}${byWhom(a)} ${when(a.decided)}${a.used ? `, done ${when(a.used)}` : ''}</div>`
     : `<div class="okb"><button class="btn ok" data-ok="${esc(a.id)}" data-d="approved">${icon('check')}Approve</button>${rejectBtn(a)}${who ? `<button class="btn ghost" style="margin-left:auto" data-ask="${esc(a.id)}">${icon('message-circle')}Ask</button>` : ''}</div>`}
   </div>`;
 }
@@ -373,12 +379,12 @@ document.addEventListener('input', (e) => {
 });
 function renderOk() {
   document.body.classList.toggle('ok-open', S.okOpen);
-  const n = pendingOks().length;
+  const n = bossOks().length, all = [...bossOks(), ...pendingOks().filter(hanaDeciding)]; // the boss's own first
   // newest decision first; only what still needs the boss stays on the first tab
   const decided = S.approvals.filter((a) => a.status !== 'pending').sort((a, b) => String(b.decided || '').localeCompare(String(a.decided || '')));
   const tab = S.okTab || 'waiting';
   const body = tab === 'waiting'
-    ? (n ? pendingOks().map(okItem).join('') : `<div class="okempty">${icon('party-popper')}All clear. Nothing waiting for you.</div>`)
+    ? ((n ? '' : `<div class="okempty">${icon('party-popper')}All clear. Nothing waiting for you.</div>`) + all.map(okItem).join(''))
     : (decided.length ? decided.slice(0, 100).map(okItem).join('') + (decided.length > 100 ? `<div class="okempty">Showing the latest 100. All decisions are kept in approvals/.</div>` : '') : `<div class="okempty">${icon('clock')}No decisions yet.</div>`);
   $('#okDrawer').inert = !S.okOpen; // closed, it slides off screen: keep its buttons out of the Tab order
   // a redraw must not move the boss: keep the list's scroll and the caret in the note being typed
@@ -679,7 +685,7 @@ const LAYOUTS_UI = [
   ['triads', 'Triads and Harvest Table', 'Two groups of three desks around round hubs, and a long harvest table with stools for stand-ups.'],
 ];
 function renderSettings() {
-  const nav = [['general', 'info', 'General'], ['addons', 'plug', 'Add-ons'], ['api', 'file-text', 'Office key and API'], ['linked', 'folder-open', 'Linked folders'], ['cleanup', 'trash-2', 'Clean up']];
+  const nav = [['general', 'info', 'General'], ['manager', 'brain', 'Manager'], ['addons', 'plug', 'Add-ons'], ['api', 'file-text', 'Office key and API'], ['linked', 'folder-open', 'Linked folders'], ['cleanup', 'trash-2', 'Clean up']];
   const CLEAN = [
     ['activity', true, 'Live activity log', 'Who worked on what (.office/events.jsonl). The office starts quiet again.'],
     ['chats', true, 'Dashboard chats', 'All chat windows and their Claude conversations (.office/chats/). Everyone starts fresh.'],
@@ -709,6 +715,15 @@ function renderSettings() {
       <span class="muted">Office folder</span><span class="mono">${esc(S.office.folder)}</span>
       <span class="muted">Dashboard</span><span class="mono">http://${esc(location.host)}</span></div>
       <p class="muted" style="margin-top:16px;line-height:1.6">To change the manager's name, ask Claude in the office folder, for example <i>"rename the manager to Hana"</i>. Everything is plain files: OFFICE.md explains each one.</p>`,
+    manager: `<h3 style="margin-bottom:6px">${esc(pa().name)}, your manager</h3>
+      <p class="muted" style="line-height:1.6;margin-bottom:14px;max-width:720px">${esc(pa().name)} acts for you as another you. Tell ${esc(pa().name)} how you think, and choose who approves staff plans.
+      Sending, payments and Always allow stay with you only. Plans about money, sending or deleting, plans sent back twice, and work in a linked folder always come to you.</p>
+      <label class="lbl" for="mgApprover">Who approves staff plans</label>
+      <select class="in" id="mgApprover" style="max-width:420px"><option value="hana">${esc(pa().name)} decides for me (I can still decide first)</option><option value="boss">I decide every plan myself</option></select>
+      <label class="lbl" for="mgProfile" style="margin-top:16px">How I think (${esc(pa().name)} reads this; staff never see it)</label>
+      <textarea class="in" id="mgProfile" rows="9" maxlength="4096" style="max-width:720px;line-height:1.5" placeholder="For example: Keep quotes short. Never give more than 5% discount. Customers in Penang get free delivery. Ask me before anything for a new customer."></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px;max-width:720px"><button class="btn pri" id="mgSave">${icon('save')}Save</button><span class="faint" id="mgCount" style="margin-left:auto;font-size:12px"></span></div>
+      <p class="faint" style="font-size:12px;margin-top:8px">Saved in .office/boss.md in the office folder.</p>`,
     addons: `${ADDON_CARDS.map(card).join('')}
       <p class="muted" style="margin-top:20px;line-height:1.6">More: email, WhatsApp, your shop, any API. Ask Claude in the office folder, for example <i>"connect my Gmail enquiries to the inbox"</i> or <i>"let Siti send WhatsApp messages"</i>.</p>`,
     api: `<h3 style="margin-bottom:8px">Office key and local API</h3>
@@ -741,6 +756,12 @@ function renderSettings() {
   const ly = $('#lySave'), lyPick = $('#lyPick');
   if (lyPick) lyPick.onchange = () => { $('#lyNote').textContent = LAYOUTS_UI.find(([k]) => k === lyPick.value)[2]; };
   if (ly) ly.onclick = () => act(() => api('office', 'PUT', { layout: lyPick.value }), 'Layout saved').then(() => refresh(['office']));
+  if (S.settings === 'manager') {
+    const pick = $('#mgApprover'), prof = $('#mgProfile'), cnt = () => { $('#mgCount').textContent = `${new Blob([prof.value]).size} / 4096 bytes`; };
+    prof.oninput = cnt;
+    api('manager').then((m) => { pick.value = m.planApprover; prof.value = m.bossProfile || ''; cnt(); }).catch((e) => toast(e.message, true));
+    $('#mgSave').onclick = () => act(() => api('manager', 'PUT', { planApprover: pick.value, bossProfile: prof.value }), 'Saved').then((m) => { if (m) { pick.value = m.planApprover; prof.value = m.bossProfile || ''; cnt(); } });
+  }
   const co = $('#coSave');
   if (co) co.onclick = () => act(() => api('office', 'PUT', { company: $('#coName').value }), 'Company saved').then(() => refresh(['office']));
   if (S.settings === 'linked') {
@@ -941,7 +962,7 @@ function renderChats() {
     redraw($('.wh', w), `${av(p)}<b>${esc(p.name)}</b>${id === 'pa' ? MGR : ''}<span class="badge ${st}"><i class="d ${st}"></i>${SLAB[st]}</span><div class="acts"><button class="ibtn" data-newchat="${esc(id)}" title="New conversation (${esc(p.name)} starts fresh; this chat stays above)" aria-label="New conversation with ${esc(p.name)}">${icon('refresh-cw')}</button><button class="ibtn" data-min="${esc(id)}" title="Minimise" aria-label="Minimise">${icon('minus')}</button><button class="ibtn" data-close="${esc(id)}" title="Close" aria-label="Close">${icon('x')}</button></div>`);
     const waits = id === 'pa' ? [] : pendingOks().filter((a) => a.from === id);
     const work = id === 'pa' ? (S.tasks || []) : (S.tasks || []).filter((t) => t.staff === id || t.from === id); // their own work, and what they asked a colleague
-    redraw($('.wstrips', w), workLine(work) + waits.map((a) => `<div class="wstrip">${icon('hand')}<div class="sq"><b>Waiting for your OK</b>${esc(a.action)}</div>${a.kind === 'plan'
+    redraw($('.wstrips', w), workLine(work) + waits.map((a) => `<div class="wstrip${hanaDeciding(a) ? ' hana' : ''}">${icon('hand')}<div class="sq"><b>${hanaDeciding(a) ? `${esc(pa().name)} is deciding` : 'Waiting for your OK'}</b>${esc(a.action)}</div>${a.kind === 'plan'
       ? `<button class="btn sm ok" data-review="${esc(a.id)}">Review plan</button>` // a plan is read (and maybe sent back with a note) in the drawer
       : `<button class="btn sm ok" data-ok="${esc(a.id)}" data-d="approved">Approve</button><button class="btn sm" data-ok="${esc(a.id)}" data-d="rejected">Reject</button>`}</div>`).join(''));
     const body = $('.wb', w);
@@ -967,8 +988,9 @@ try { workMin = localStorage.getItem(WKEY) === '1'; } catch { /* private window:
 const nameOfStaff = (id) => (personOf(id) || { name: id }).name;
 // tasks that wait for other tasks (after:), with what they wait for: "Waiting for Siti" or the task's title
 // pool tasks (staff: any) wait for whoever is free first: "Waiting for a free Sales"
-const waitingOf = (list = []) => list.filter((t) => t.waiting || t.pool || t.status === 'plan-ready').map((t) => {
-  if (t.status === 'plan-ready') return { ...t, waitFor: 'your OK on the plan' };
+const waitingOf = (list = []) => list.filter((t) => t.waiting || t.pool || t.status === 'plan-ready' || (t.status === 'forwarded' && !t.dismissed && !gone.includes(t.id))).map((t) => {
+  if (t.status === 'forwarded') return { ...t, waitFor: '', forwarded: true }; // a staff asked a colleague: it went to the manager
+  if (t.status === 'plan-ready') { const a = S.approvals.find((x) => x.id === t.approval); return { ...t, waitFor: a && hanaDeciding(a) ? `${pa().name} to decide the plan` : 'your OK on the plan' }; }
   if (t.pool && !t.waiting) return { ...t, waitFor: '' }; // worked out when drawn: who is busy changes all the time
   const deps = (t.after || []).map((a) => list.find((x) => x.id === a));
   const d = deps.find((x) => x && x.status !== 'done');
@@ -1037,10 +1059,13 @@ function renderWork() {
   redraw(el, `<div class="wkh" data-work="${office ? 'fold' : 'close'}" role="button" tabindex="0" aria-expanded="${open}" title="${office ? (open ? 'Fold' : 'Show the list') : 'Close'}"><i class="d ${work.length ? 'working' : 'waiting'}"></i><b>${label}</b><span class="heads">${heads}</span>${icon(office ? 'chevron-down' : 'x')}</div>`
     + (open ? `<div class="wkl">${work.map((t) => {
       const p = personOf(t.staff) || { name: t.staff }, asked = t.from && t.from !== 'pa' && t.from !== t.staff ? personOf(t.from) : null;
-      return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+      const by = asked ? asked.name : t.from === 'office' ? 'the office' : ''; // office: work the office made by itself (an approved action, the idle hook)
+      return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${by ? ` <span class="faint">(${asked ? 'asked by' : 'from'} ${esc(by)})</span>` : ''}</div><span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${wait.map((t) => {
       const p = (!t.pool && personOf(t.staff)) || { name: t.pool ? (t.role ? `${cap(t.role)} team` : 'Anyone free') : t.staff };
       const review = t.status === 'plan-ready' && t.approval ? ` data-review="${esc(t.approval)}" role="button" tabindex="0" title="Open the plan in Needs your OK"` : '';
+      if (t.forwarded) { const f = personOf(t.from) || { name: t.from }; // not run: the manager decides what to do with it
+        return `<div class="wk wait fwd" data-task="${esc(t.id)}">${f.colour ? av(f, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(f.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Sent to ${esc(pa().name)} (asked for ${esc(isPoolId(t.staff) ? 'anyone free' : nameOfStaff(t.staff))})</span></div><button class="btn sm" data-dismiss="${esc(t.id)}">Dismiss</button></div>`; }
       return `<div class="wk wait${t.pool ? ' pool' : ''}${review ? ' link' : ''}" data-task="${esc(t.id)}"${review}>${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.pool && !t.waiting ? poolWait(t) : t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${fail.length ? `<div class="wkcut">Could not finish</div>${fail.map((t) => {
       const p = personOf(t.staff) || { name: isPoolId(t.staff) ? (t.role ? `${cap(t.role)} team` : 'The team') : t.staff }, grey = stoppedBefore(t);
@@ -1054,10 +1079,10 @@ document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-rerun],[data-dismiss]'); if (!r) return;
   r.disabled = true;
   const id = r.dataset.rerun || r.dataset.dismiss;
-  const hide = () => { S.interrupted = (S.interrupted || []).filter((t) => t.id !== id); S.failed = (S.failed || []).filter((t) => t.id !== id); renderWork(); };
+  const hide = () => { S.interrupted = (S.interrupted || []).filter((t) => t.id !== id); S.failed = (S.failed || []).filter((t) => t.id !== id); S.waiting = (S.waiting || []).filter((t) => t.id !== id); renderWork(); };
   api(`tasks/${encodeURIComponent(id)}/${r.dataset.rerun ? 'rerun' : 'dismiss'}`, 'POST')
     .then(() => {
-      if (r.dataset.dismiss && (S.failed || []).some((t) => t.id === id)) { gone = [...gone.slice(-199), id]; try { localStorage.setItem(FKEY, JSON.stringify(gone)); } catch { /* this tab only */ } }
+      if (r.dataset.dismiss && [...(S.failed || []), ...(S.waiting || [])].some((t) => t.id === id)) { gone = [...gone.slice(-199), id]; try { localStorage.setItem(FKEY, JSON.stringify(gone)); } catch { /* this tab only */ } }
       hide(); toast(r.dataset.rerun ? 'Started again' : 'Dismissed');
     }, (er) => { r.disabled = false; toast(er.message, true); });
 });
