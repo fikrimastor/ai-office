@@ -924,6 +924,11 @@ const WKEY = 'aio.workMin';
 let workMin = false, workPop = false;
 try { workMin = localStorage.getItem(WKEY) === '1'; } catch { /* private window: start open */ }
 const nameOfStaff = (id) => (personOf(id) || { name: id }).name;
+// tasks that wait for other tasks (after:), with what they wait for: "Waiting for Siti" or the task's title
+const waitingOf = (list = []) => list.filter((t) => t.waiting).map((t) => {
+  const d = (t.after || []).map((a) => list.find((x) => x.id === a)).find((x) => x && x.status !== 'done');
+  return { ...t, waitFor: d ? (d.status === 'working' ? nameOfStaff(d.staff) : d.title || d.id) : '' };
+});
 const since = (iso) => { const m = Math.floor((Date.now() - Date.parse(iso)) / 60000); return Number.isNaN(m) ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 function workLine(work) {
   if (!work.length) return '';
@@ -936,20 +941,23 @@ function workLine(work) {
 function renderWork() {
   let el = $('#work');
   if (!el) { el = document.createElement('div'); el.id = 'work'; document.body.append(el); }
-  const work = S.tasks || [], cut = S.interrupted || [], office = S.view === 'office';
-  if (!work.length && !cut.length) workPop = false;
-  el.hidden = !((work.length || cut.length) && (office || workPop));
+  const work = S.tasks || [], cut = S.interrupted || [], wait = S.waiting || [], office = S.view === 'office';
+  if (!work.length && !cut.length && !wait.length) workPop = false;
+  el.hidden = !((work.length || cut.length || wait.length) && (office || workPop));
   if (el.hidden) return;
   el.className = office ? `board${workMin ? ' min' : ''}` : 'pop';
   if (office) el.style.left = '';
   else { const r = $('#stat').getBoundingClientRect(); el.style.left = `${Math.max(8, Math.min(r.left - 10, innerWidth - 338))}px`; }
   const heads = [...new Set(work.map((t) => t.staff))].map(personOf).filter(Boolean).slice(0, 5).map((p) => av(p)).join('');
   const open = !office || !workMin;
-  const label = [work.length ? `${work.length} working` : '', cut.length ? `${cut.length} interrupted` : ''].filter(Boolean).join(', ');
+  const label = [work.length ? `${work.length} working` : '', wait.length ? `${wait.length} waiting` : '', cut.length ? `${cut.length} interrupted` : ''].filter(Boolean).join(', ');
   redraw(el, `<div class="wkh" data-work="${office ? 'fold' : 'close'}" role="button" tabindex="0" aria-expanded="${open}" title="${office ? (open ? 'Fold' : 'Show the list') : 'Close'}"><i class="d ${work.length ? 'working' : 'waiting'}"></i><b>${label}</b><span class="heads">${heads}</span>${icon(office ? 'chevron-down' : 'x')}</div>`
     + (open ? `<div class="wkl">${work.map((t) => {
       const p = personOf(t.staff) || { name: t.staff }, asked = t.from && t.from !== 'pa' && t.from !== t.staff ? personOf(t.from) : null;
       return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+    }).join('')}${wait.map((t) => {
+      const p = personOf(t.staff) || { name: t.staff };
+      return `<div class="wk wait" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${cut.length ? `<div class="wkcut">Stopped by a restart</div>${cut.map((t) => {
       const p = personOf(t.staff) || { name: t.staff };
       return `<div class="wk cut">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${t.finished ? when(t.finished) : ''}</span></div><div class="ti">${esc(t.title || t.id)}</div></div><div class="wkb"><button class="btn sm ok" data-rerun="${esc(t.id)}">Run again</button><button class="btn sm" data-dismiss="${esc(t.id)}">Dismiss</button></div></div>`;
@@ -1012,7 +1020,7 @@ document.addEventListener('click', (e) => {
   else if (t.dataset.close) { e.stopPropagation(); closeChat(t.dataset.close); }
   else if (t.dataset.min) { e.stopPropagation(); toggleMin(t.dataset.min); }
   else if (t.dataset.stop) api(`chat/${t.dataset.stop}/stop`, 'POST').catch((er) => toast(er.message, true));
-  else if (t.dataset.stoptask) api(`tasks/${encodeURIComponent(t.dataset.stoptask)}/stop`, 'POST').then(() => toast('Task stopped'), (er) => toast(er.message, true));
+  else if (t.dataset.stoptask) api(`tasks/${encodeURIComponent(t.dataset.stoptask)}/stop`, 'POST').then(() => { S.waiting = (S.waiting || []).filter((x) => x.id !== t.dataset.stoptask); renderWork(); toast('Task stopped'); }, (er) => toast(er.message, true));
   else if (t.dataset.newchat) { e.stopPropagation(); api(`chat/${t.dataset.newchat}/new`, 'POST').then(() => toast('New conversation started'), (er) => toast(er.message, true)); }
   else if (t.hasAttribute('data-copy')) {
     const code = t.parentElement.querySelector('code').textContent;
@@ -1079,7 +1087,7 @@ function live() {
   });
   es.addEventListener('doctools', (e) => { S.doctools = JSON.parse(e.data); const l = $('.dtline'); if (l) l.outerHTML = docToolsLine(); }); // in place: keeps unsaved edits
   es.addEventListener('usage', (e) => { S.usage = JSON.parse(e.data); renderUsage(); });
-  es.addEventListener('tasks', (e) => { const act = JSON.parse(e.data); api('tasks').then((r) => { S.tasks = r.active.map((a) => ({ ...a, ...(r.list.find((t) => t.id === a.id) || {}) })); S.interrupted = r.interrupted || []; renderChats(); }).catch(() => {}); S.tasks = act; renderChats(); });
+  es.addEventListener('tasks', (e) => { const act = JSON.parse(e.data); api('tasks').then((r) => { S.tasks = r.active.map((a) => ({ ...a, ...(r.list.find((t) => t.id === a.id) || {}) })); S.waiting = waitingOf(r.list); S.interrupted = r.interrupted || []; renderChats(); }).catch(() => {}); S.tasks = act; renderChats(); });
   es.addEventListener('chatlive', (e) => { const { id, step, text } = JSON.parse(e.data); const c = chatOf(id); c.live = { step, text }; if (c.running && !c.since) c.since = Date.now(); renderLive(id); });
   es.addEventListener('taskstep', (e) => {
     const x = JSON.parse(e.data);
@@ -1090,6 +1098,7 @@ function live() {
   es.addEventListener('chatstate', (e) => { const { id, running } = JSON.parse(e.data); const c = chatOf(id); c.running = running; c.since = running ? (c.since || Date.now()) : null; if (!running) c.live = null; renderChats(); });
   es.addEventListener('changed', (e) => {
     const areas = JSON.parse(e.data).map((a) => (a === 'office' ? ['office', 'staff'] : a === 'staff' ? ['staff', 'office'] : [a])).flat();
+    if (areas.includes('tasks')) api('tasks').then((r) => { S.waiting = waitingOf(r.list); renderWork(); }).catch(() => {}); // a task file came or changed: tasks that wait for others
     refresh([...new Set(areas)].filter((a) => a !== 'events')).catch(() => {});
   });
   es.onopen = () => { fails = 0; if (bar) { bar.remove(); bar = null; load().then(render); } };
@@ -1103,6 +1112,7 @@ function live() {
   const run = await api('chats').catch(() => ({ running: [] }));
   const tk = await api('tasks').catch(() => ({ active: [], list: [] }));
   S.tasks = tk.active.map((a) => ({ ...a, ...(tk.list.find((t) => t.id === a.id) || {}) }));
+  S.waiting = waitingOf(tk.list);
   S.interrupted = tk.interrupted || [];
   run.running.forEach((id) => { chatOf(id).running = true; });
   go(location.hash.slice(1) || 'office');

@@ -11,3 +11,6 @@ CLAUDE.local.md
 .projectmem/watch.log
 .projectmem/structure.json
 .projectmem/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

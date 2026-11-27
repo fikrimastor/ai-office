@@ -370,6 +370,7 @@ body.term #work.board{top:calc(var(--top) + var(--sub) + 56px)}
 .wk .ti{overflow-wrap:anywhere}
 .wk .now{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wk .now:before{content:"\25B8\00a0"}
+.wk.wait .now:before{content:"\23F8\00a0"}
 .wk .btn{margin-top:2px}
 /* slim scrollbars everywhere (no arrow buttons); light on the dark code blocks */
 *{scrollbar-width:thin;scrollbar-color:var(--scroll) transparent}

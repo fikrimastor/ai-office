@@ -37,7 +37,7 @@ File paths in the chat are links: click one and the file opens in its app (Power
 **Let Claude do it (easiest).** Open Claude Code and paste:
 
 ```
-Install AI Office for me: https://raw.githubusercontent.com/fikrimastor/ai-office/main/INSTALL.md
+Install AI Office for me: https://raw.githubusercontent.com/fikrimastor/ai-office/personal/INSTALL.md
 ```
 
 Claude asks you a few questions one at a time (company name, folder, your manager's name, which staff),
@@ -46,7 +46,7 @@ creates your office folder and opens the dashboard. You only answer and say OK.
 **Or in a terminal**, with Node.js 18 or newer:
 
 ```
-npx github:fikrimastor/ai-office
+npx github:fikrimastor/ai-office#personal
 ```
 
 Next time, double-click **Start AI Office** in your office folder (on Linux and WSL: run `./start-office.sh`).

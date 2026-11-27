@@ -134,6 +134,69 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     assert.deepStrictEqual(tasks.interrupted(), []);
   });
 
+  const putAfter = (id, staff, after, text) => fs.writeFileSync(path.join(dir, 'tasks', `${id}.md`), `---\nstaff: ${staff}\nafter: ${after}\nstatus: new\n---\n${text}\n`);
+
+  await test('a task with after: waits, then starts on its own when that task is done', async () => {
+    put('d1', 'siti', 'LONG quote for the invoice');
+    putAfter('d2', 'nurul', 'd1', 'invoice from the quote');
+    tasks.scan();
+    assert.strictEqual(tasks.read('d2').status, 'new');
+    assert.strictEqual(tasks.list().find((t) => t.id === 'd2').waiting, true);
+    assert.deepStrictEqual(tasks.list().find((t) => t.id === 'd2').after, ['d1']);
+    assert.ok(!tasks.active().some((a) => a.id === 'd2'), 'nurul is free but the invoice waits for the quote');
+    await until(() => tasks.read('d2').status === 'done');
+    const c = calls().find((x) => x.args[x.args.indexOf('-p') + 1].includes('invoice from the quote'));
+    assert.ok(c.args[c.args.indexOf('-p') + 1].includes(path.join(dir, 'tasks', 'd1.md')), 'told to read the earlier result');
+    assert.ok(Date.parse(tasks.read('d2').started) >= Date.parse(tasks.read('d1').finished));
+  });
+
+  await test('a task waiting for a failed task fails too, with a plain reason', async () => {
+    put('f1', 'ghost', 'nobody does this');
+    putAfter('f2', 'nurul', 'f1', 'needs the ghost work');
+    tasks.scan();
+    assert.strictEqual(tasks.read('f2').status, 'failed');
+    assert.match(tasks.read('f2').result, /waits for task "f1".*failed/);
+    assert.ok(ended.some(([id, st]) => id === 'f2' && st === 'failed'));
+  });
+
+  await test('a task may be written before the task it waits for', async () => {
+    putAfter('r2', 'nurul', 'r1', 'invoice written first');
+    tasks.scan();
+    assert.strictEqual(tasks.read('r2').status, 'new', 'still in the grace time, not failed');
+    assert.strictEqual(tasks.list().find((t) => t.id === 'r2').waiting, true);
+    put('r1', 'siti', 'quote written second');
+    tasks.scan();
+    await until(() => tasks.read('r2').status === 'done');
+    assert.ok(Date.parse(tasks.read('r2').started) >= Date.parse(tasks.read('r1').finished));
+  });
+
+  await test('a task waiting for a task that does not exist fails', async () => {
+    fs.writeFileSync(path.join(dir, 'tasks', 'm1.md'), '---\nstaff: nurul\nafter: nope\nstatus: new\ncreated: 2020-01-01T00:00:00.000Z\n---\nneeds nothing real\n'); // older than the grace time
+    tasks.scan();
+    assert.strictEqual(tasks.read('m1').status, 'failed');
+    assert.match(tasks.read('m1').result, /no such task/);
+  });
+
+  await test('tasks that wait for each other (or themselves) fail', async () => {
+    putAfter('c1', 'siti', 'c2', 'one');
+    putAfter('c2', 'nurul', 'c1', 'two');
+    putAfter('c3', 'aina', 'c3', 'myself');
+    tasks.scan();
+    for (const id of ['c1', 'c2', 'c3']) assert.strictEqual(tasks.read(id).status, 'failed');
+    assert.match(tasks.read('c1').result, /circle/); assert.match(tasks.read('c3').result, /circle/);
+  });
+
+  await test('Stop cancels a waiting task', async () => {
+    put('s1', 'siti', 'LONG long quote two');
+    putAfter('s2', 'nurul', 's1', 'invoice two later');
+    tasks.scan();
+    assert.deepStrictEqual(tasks.stop('s2'), { ok: true });
+    assert.strictEqual(tasks.read('s2').status, 'stopped');
+    assert.strictEqual(tasks.read('s2').result, 'Cancelled by the boss before it started.');
+    await until(() => tasks.read('s1').status === 'done');
+    assert.strictEqual(tasks.read('s2').status, 'stopped', 'not started after the quote is done');
+  });
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${n} task tests passed`);
 })().catch((e) => { console.error(e); process.exit(1); });
