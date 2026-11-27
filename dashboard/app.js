@@ -48,6 +48,7 @@ const views = ['office', 'staff', 'projects', 'inbox', 'settings'];
 
 async function load(areas = ['office', 'staff', 'projects', 'inbox', 'approvals']) {
   const map = { office: 'office', staff: 'staff', projects: 'projects', inbox: 'inbox', approvals: 'approvals' };
+  areas = areas.filter((a) => map[a]); // tasks and mail have their own handlers: no /api/undefined
   await Promise.all(areas.map(async (a) => { S[a] = await api(map[a]); }));
   if (areas.includes('projects') && S.sel.project) S.project = await api(`projects/${encodeURIComponent(S.sel.project)}`).catch(() => null);
 }
@@ -161,9 +162,10 @@ function renderTop() {
   const tabs = [['office', 'layout-grid', 'Office', ''], ['staff', 'users', 'Staff', S.staff.length],
     ['projects', 'folder', 'Projects', activeP || ''], ['inbox', 'inbox', 'Inbox', newIn || '']];
   redraw($('#tabs'), tabs.map(([v, ic, label, n]) => `<button class="tab ${S.view === v ? 'on' : ''}" data-go="${v}" aria-label="${label}" title="${label}">${icon(ic)}<span class="tl">${label}</span>${n !== '' ? ` <span class="n ${v === 'inbox' ? 'warn' : ''}">${n}</span>` : ''}</button>`).join(''));
-  const st = Object.values(S.status.people);
+  const st = Object.entries(S.status.people).filter(([k]) => k !== 'pa').map(([, x]) => x); // staff only, like the work board
   const cnt = (k) => st.filter((x) => x.status === k).length;
   $('#stat').innerHTML = `<span class="d working" style="background:#4ADE80"></span><b>${cnt('working')}</b><span class="tl"> working</span> <span class="d" style="background:rgba(255,255,255,.55);margin-left:8px"></span><b>${cnt('sleeping')}</b><span class="tl"> sleeping</span>${cnt('waiting') ? ` <span class="d" style="background:#FFB020;margin-left:8px"></span><b>${cnt('waiting')}</b><span class="tl"> waiting</span>` : ''}`;
+  $('#stat').title = 'Staff working now (not counting the manager)';
   $('#where').textContent = location.host;
   $('#gear').innerHTML = icon('settings');
 }
@@ -339,18 +341,36 @@ function renderOkButton() {
   b.innerHTML = n ? `${icon('hand')}<b>${n}</b><span class="oklbl"> need your OK</span>${icon(S.okOpen ? 'chevron-right' : 'chevron-left')}`
     : `${icon('check')}<span class="oklbl">All clear</span>${icon(S.okOpen ? 'chevron-right' : 'chevron-left')}`;
 }
+// Plan notes the boss is typing, by approval id: they survive every redraw of the drawer.
+const notes = {};
+// The boss's note on a decided item: a "Boss: ..." line the office adds (or a note field, if the API sends one).
+// "The task was stopped." is the office closing a plan whose task was stopped, not a note from the boss.
+const bossNote = (a) => { const n = a.note || ((String(a.details || '').match(/(?:^|\n)Boss: (.+)/) || [])[1] || ''); return n.trim() === 'The task was stopped.' ? '' : n.trim(); };
+// Reject on a plan: with a note it sends the plan back; with no note it stops the task.
+const rejectBtn = (a) => (a.kind !== 'plan' ? `<button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('x')}Reject</button>`
+  : (notes[a.id] || '').trim() ? `<button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('rotate-ccw')}Send back with note</button>`
+    : `<button class="btn danger" data-ok="${esc(a.id)}" data-d="rejected">${icon('x')}Reject and stop</button>`);
 function okItem(a) {
   const who = staffById(a.from);
   const done = a.status !== 'pending';
-  return `<div class="oki ${done ? 'done' : ''}">
+  const sentBack = a.kind === 'plan' && a.status === 'rejected' && bossNote(a);
+  return `<div class="oki ${done ? 'done' : ''}" data-oki="${esc(a.id)}">
     <div class="okh2">${who ? av(who) : ''}<b>${esc(who ? who.name : a.from)}</b><span class="faint">${when(a.created)}</span>${a.project ? `<span class="proj">${esc(a.project)}</span>` : ''}</div>
     <div class="okq">${esc(a.action)}</div>${a.details ? `<div class="okc${a.kind === 'plan' ? ' plan' : ''}">${esc(a.details)}</div>` : ''}
-    ${a.kind === 'plan' && !done ? `<div class="okc faint">If you approve, ${esc(who ? who.name : a.from)} does the work with this plan. To get a new plan, write what to change, then Reject. Reject with no note stops the task.</div><textarea class="in oknote" data-note rows="2" placeholder="What to change (optional)"></textarea>` : ''}
+    ${a.kind === 'plan' && !done ? `<div class="okc faint">If you approve, ${esc(who ? who.name : a.from)} does the work with this plan. Want a new plan? Write what to change, then Send back. With no note, Reject stops the task.</div><textarea class="in oknote" data-note="${esc(a.id)}" rows="2" aria-label="What to change in this plan (optional)" placeholder="What to change (optional)">${esc(notes[a.id] || '')}</textarea>` : ''}
     ${a.tool ? `<div class="okc faint">${done ? '' : `If you approve, ${esc(who ? who.name : a.from)} does it right away. `}Exact action: <span class="mono">${esc(a.tool)} ${esc(a.input || '')}</span></div>` : ''}
-    ${done ? `<div class="okdone ${a.status}">${icon(a.status === 'approved' ? 'check' : 'x')}${a.status === 'approved' ? 'Approved' : 'Rejected'} ${when(a.decided)}${a.used ? `, done ${when(a.used)}` : ''}</div>`
-    : `<div class="okb"><button class="btn ok" data-ok="${esc(a.id)}" data-d="approved">${icon('check')}Approve</button><button class="btn" data-ok="${esc(a.id)}" data-d="rejected">${icon('x')}Reject</button>${who ? `<button class="btn ghost" style="margin-left:auto" data-ask="${esc(a.id)}">${icon('message-circle')}Ask</button>` : ''}</div>`}
+    ${done ? `<div class="okdone ${sentBack ? 'sentback' : a.status}">${icon(a.status === 'approved' ? 'check' : sentBack ? 'rotate-ccw' : 'x')}${a.status === 'approved' ? 'Approved' : sentBack ? 'Sent back for a new plan' : 'Rejected'} ${when(a.decided)}${a.used ? `, done ${when(a.used)}` : ''}</div>`
+    : `<div class="okb"><button class="btn ok" data-ok="${esc(a.id)}" data-d="approved">${icon('check')}Approve</button>${rejectBtn(a)}${who ? `<button class="btn ghost" style="margin-left:auto" data-ask="${esc(a.id)}">${icon('message-circle')}Ask</button>` : ''}</div>`}
   </div>`;
 }
+document.addEventListener('input', (e) => {
+  const ta = e.target.closest('[data-note]'); if (!ta) return;
+  const id = ta.dataset.note, had = !!(notes[id] || '').trim();
+  notes[id] = ta.value;
+  if (had === !!ta.value.trim()) return; // the button only changes when the note goes from empty to written, or back
+  const a = S.approvals.find((x) => x.id === id), old = ta.closest('.oki') && ta.closest('.oki').querySelector('[data-d="rejected"]');
+  if (a && old) old.outerHTML = rejectBtn(a);
+});
 function renderOk() {
   document.body.classList.toggle('ok-open', S.okOpen);
   const n = pendingOks().length;
@@ -361,12 +381,30 @@ function renderOk() {
     ? (n ? pendingOks().map(okItem).join('') : `<div class="okempty">${icon('party-popper')}All clear. Nothing waiting for you.</div>`)
     : (decided.length ? decided.slice(0, 100).map(okItem).join('') + (decided.length > 100 ? `<div class="okempty">Showing the latest 100. All decisions are kept in approvals/.</div>` : '') : `<div class="okempty">${icon('clock')}No decisions yet.</div>`);
   $('#okDrawer').inert = !S.okOpen; // closed, it slides off screen: keep its buttons out of the Tab order
+  // a redraw must not move the boss: keep the list's scroll and the caret in the note being typed
+  const ae = document.activeElement, caret = ae && ae.matches('#okDrawer [data-note]') ? [ae.selectionStart, ae.selectionEnd, ae.selectionDirection] : null;
+  const top = ($('#okDrawer .okbody') || {}).scrollTop || 0;
   redraw($('#okDrawer'), `<div class="okhead"><span class="okicon">${icon('hand')}</span>Needs your OK<span class="okn ${n ? '' : 'zero'}">${n}</span><button class="ibtn" data-oktoggle title="Close" aria-label="Close">${icon('x')}</button></div>
     <div class="oktabs"><div class="seg"><button class="${tab === 'waiting' ? 'on' : ''}" data-oktab="waiting">Waiting <span>${n}</span></button><button class="${tab === 'history' ? 'on' : ''}" data-oktab="history">History <span>${decided.length}</span></button></div></div>
     <div class="okbody">${body}</div>`);
+  $('#okDrawer .okbody').scrollTop = top;
+  if (caret && document.activeElement && document.activeElement.matches('[data-note]')) try { document.activeElement.setSelectionRange(...caret); } catch { /* gone */ }
   $$('[data-oktab]', $('#okDrawer')).forEach((b) => { b.onclick = () => { S.okTab = b.dataset.oktab; renderOk(); }; });
   renderOkButton();
 }
+// Open the drawer at one waiting item (a plan from a chat strip or the work board) and put the caret in its note.
+function openOkAt(id) {
+  S.okOpen = true; S.okTab = 'waiting'; renderOk(); renderChats();
+  const it = id && $(`#okDrawer [data-oki="${CSS.escape(id)}"]`);
+  if (!it) { const dr = $('#okDrawer'); dr.tabIndex = -1; dr.focus(); return; }
+  it.scrollIntoView({ block: 'start' });
+  ($('[data-note]', it) || $('button', it)).focus({ preventScroll: true });
+}
+function closeOk() { S.okOpen = false; renderOk(); renderChats(); ($('#okStat') || document.body).focus(); }
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !S.okOpen || $('#modal').classList.contains('on')) return;
+  e.preventDefault(); closeOk();
+});
 
 // ------------------------------------------------------------------ staff
 function renderStaff(fromStatus) {
@@ -903,7 +941,9 @@ function renderChats() {
     redraw($('.wh', w), `${av(p)}<b>${esc(p.name)}</b>${id === 'pa' ? MGR : ''}<span class="badge ${st}"><i class="d ${st}"></i>${SLAB[st]}</span><div class="acts"><button class="ibtn" data-newchat="${esc(id)}" title="New conversation (${esc(p.name)} starts fresh; this chat stays above)" aria-label="New conversation with ${esc(p.name)}">${icon('refresh-cw')}</button><button class="ibtn" data-min="${esc(id)}" title="Minimise" aria-label="Minimise">${icon('minus')}</button><button class="ibtn" data-close="${esc(id)}" title="Close" aria-label="Close">${icon('x')}</button></div>`);
     const waits = id === 'pa' ? [] : pendingOks().filter((a) => a.from === id);
     const work = id === 'pa' ? (S.tasks || []) : (S.tasks || []).filter((t) => t.staff === id || t.from === id); // their own work, and what they asked a colleague
-    redraw($('.wstrips', w), workLine(work) + waits.map((a) => `<div class="wstrip">${icon('hand')}<div class="sq"><b>Waiting for your OK</b>${esc(a.action)}</div><button class="btn sm ok" data-ok="${esc(a.id)}" data-d="approved">Approve</button><button class="btn sm" data-ok="${esc(a.id)}" data-d="rejected">Reject</button></div>`).join(''));
+    redraw($('.wstrips', w), workLine(work) + waits.map((a) => `<div class="wstrip">${icon('hand')}<div class="sq"><b>Waiting for your OK</b>${esc(a.action)}</div>${a.kind === 'plan'
+      ? `<button class="btn sm ok" data-review="${esc(a.id)}">Review plan</button>` // a plan is read (and maybe sent back with a note) in the drawer
+      : `<button class="btn sm ok" data-ok="${esc(a.id)}" data-d="approved">Approve</button><button class="btn sm" data-ok="${esc(a.id)}" data-d="rejected">Reject</button>`}</div>`).join(''));
     const body = $('.wb', w);
     const atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
     const intro = id === 'pa' ? `${esc(p.name)} is your manager. Tell them what you need; they hand it to the right staff.` : `Direct chat with ${esc(p.name)} (${esc(p.role)}).`;
@@ -929,10 +969,48 @@ const nameOfStaff = (id) => (personOf(id) || { name: id }).name;
 // pool tasks (staff: any) wait for whoever is free first: "Waiting for a free Sales"
 const waitingOf = (list = []) => list.filter((t) => t.waiting || t.pool || t.status === 'plan-ready').map((t) => {
   if (t.status === 'plan-ready') return { ...t, waitFor: 'your OK on the plan' };
-  if (t.pool && !t.waiting) return { ...t, waitFor: t.role ? `a free ${t.role}` : 'anyone free' };
-  const d = (t.after || []).map((a) => list.find((x) => x.id === a)).find((x) => x && x.status !== 'done');
-  return { ...t, waitFor: d ? (d.status === 'working' ? nameOfStaff(d.staff) : d.title || d.id) : '' };
+  if (t.pool && !t.waiting) return { ...t, waitFor: '' }; // worked out when drawn: who is busy changes all the time
+  const deps = (t.after || []).map((a) => list.find((x) => x.id === a));
+  const d = deps.find((x) => x && x.status !== 'done');
+  return { ...t, waitFor: d ? (d.status === 'working' ? nameOfStaff(d.staff) : d.title || d.id) : deps.some((x) => !x) ? 'a task that is not there yet' : '' };
 });
+const isPoolId = (x) => !x || String(x).toLowerCase() === 'any';
+const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+const roleWords = (x) => String(x || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+// pool task: "a free Sales staff (Siti, Zul are busy)", same role match as lib/tasks.js fits()
+function poolWait(t) {
+  const w = roleWords(t.role), fit = S.staff.filter((s) => s.id !== t.from && (!w.length || roleWords(s.role).some((x) => w.includes(x))));
+  const busy = fit.filter((s) => (S.tasks || []).some((x) => x.staff === s.id)).map((s) => s.name);
+  const who = busy.length ? ` (${busy.join(', ')} ${busy.length === 1 ? 'is' : 'are'} busy)` : '';
+  return `${t.role ? `a free ${cap(t.role)} staff` : 'anyone free'}${who}`;
+}
+// Failed tasks the boss has not run again or dismissed. Dismissed ones are also kept in this browser, because
+// the server's dismiss only marks restart-stopped tasks for now.
+const FKEY = 'aio.dismissed';
+let gone = [];
+try { gone = JSON.parse(localStorage.getItem(FKEY) || '[]'); } catch { /* private window: none */ }
+const failedOf = (list = []) => list.filter((t) => t.status === 'failed' && !t.dismissed && t.interrupted !== 'dismissed' && !gone.includes(t.id) && !list.some((x) => x.again === t.id))
+  .map((t) => ({ ...t, why: String(t.result || '').split('\n').map((l) => l.trim()).find(Boolean) || 'No reason given.' }));
+// a failed task that never started because the boss stopped a task before it (also down a chain: A stopped,
+// so B failed, so C failed): nothing went wrong, it shows grey
+const stoppedBefore = (t, list = S.taskList || [], seen = new Set()) => {
+  if (/which was stopped/.test(t.why || t.result || '')) return true;
+  const m = /waits for task "([^"]+)".*which failed/.exec(t.why || t.result || ''), d = m && !seen.has(m[1]) && list.find((x) => x.id === m[1]);
+  return !!d && (seen.add(m[1]), stoppedBefore(d, list, seen));
+};
+function applyTasks(r) {
+  S.taskList = r.list || [];
+  S.tasks = (r.active || []).map((a) => ({ ...a, ...(S.taskList.find((t) => t.id === a.id) || {}) }));
+  S.waiting = waitingOf(S.taskList);
+  S.interrupted = r.interrupted || [];
+  S.failed = failedOf(S.taskList);
+}
+const loadTasks = () => api('tasks').then(applyTasks);
+// how many waiting tasks start only after this one (also through each other): they are cancelled when it stops
+function downstream(id) {
+  const list = S.taskList || [], out = new Set(), walk = (x) => list.forEach((t) => { if (t.status === 'new' && (t.after || []).includes(x) && !out.has(t.id)) { out.add(t.id); walk(t.id); } });
+  walk(id); return out.size;
+}
 const since = (iso) => { const m = Math.floor((Date.now() - Date.parse(iso)) / 60000); return Number.isNaN(m) ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 function workLine(work) {
   if (!work.length) return '';
@@ -945,24 +1023,29 @@ function workLine(work) {
 function renderWork() {
   let el = $('#work');
   if (!el) { el = document.createElement('div'); el.id = 'work'; document.body.append(el); }
-  const work = S.tasks || [], cut = S.interrupted || [], wait = S.waiting || [], office = S.view === 'office';
-  if (!work.length && !cut.length && !wait.length) workPop = false;
-  el.hidden = !((work.length || cut.length || wait.length) && (office || workPop));
+  const work = S.tasks || [], cut = S.interrupted || [], wait = S.waiting || [], fail = S.failed || [], office = S.view === 'office';
+  if (!work.length && !cut.length && !wait.length && !fail.length) workPop = false;
+  el.hidden = !((work.length || cut.length || wait.length || fail.length) && (office || workPop));
   if (el.hidden) return;
   el.className = office ? `board${workMin ? ' min' : ''}` : 'pop';
   if (office) el.style.left = '';
   else { const r = $('#stat').getBoundingClientRect(); el.style.left = `${Math.max(8, Math.min(r.left - 10, innerWidth - 338))}px`; }
   const heads = [...new Set(work.map((t) => t.staff))].map(personOf).filter(Boolean).slice(0, 5).map((p) => av(p)).join('');
   const open = !office || !workMin;
-  const label = [work.length ? `${work.length} working` : '', wait.length ? `${wait.length} waiting` : '', cut.length ? `${cut.length} interrupted` : ''].filter(Boolean).join(', ');
+  const real = fail.filter((t) => !stoppedBefore(t)).length;
+  const label = [work.length ? `${work.length} working` : '', wait.length ? `${wait.length} waiting` : '', cut.length ? `${cut.length} interrupted` : '', real ? `${real} could not finish` : ''].filter(Boolean).join(', ') || `${fail.length} not started`;
   redraw(el, `<div class="wkh" data-work="${office ? 'fold' : 'close'}" role="button" tabindex="0" aria-expanded="${open}" title="${office ? (open ? 'Fold' : 'Show the list') : 'Close'}"><i class="d ${work.length ? 'working' : 'waiting'}"></i><b>${label}</b><span class="heads">${heads}</span>${icon(office ? 'chevron-down' : 'x')}</div>`
     + (open ? `<div class="wkl">${work.map((t) => {
       const p = personOf(t.staff) || { name: t.staff }, asked = t.from && t.from !== 'pa' && t.from !== t.staff ? personOf(t.from) : null;
       return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${wait.map((t) => {
-      const p = (!t.pool && personOf(t.staff)) || { name: t.pool ? t.role || 'Anyone' : t.staff };
-      return `<div class="wk wait${t.pool ? ' pool' : ''}" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
-    }).join('')}${cut.length ? `<div class="wkcut">Stopped by a restart</div>${cut.map((t) => {
+      const p = (!t.pool && personOf(t.staff)) || { name: t.pool ? (t.role ? `${cap(t.role)} team` : 'Anyone free') : t.staff };
+      const review = t.status === 'plan-ready' && t.approval ? ` data-review="${esc(t.approval)}" role="button" tabindex="0" title="Open the plan in Needs your OK"` : '';
+      return `<div class="wk wait${t.pool ? ' pool' : ''}${review ? ' link' : ''}" data-task="${esc(t.id)}"${review}>${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.pool && !t.waiting ? poolWait(t) : t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+    }).join('')}${fail.length ? `<div class="wkcut">Could not finish</div>${fail.map((t) => {
+      const p = personOf(t.staff) || { name: isPoolId(t.staff) ? (t.role ? `${cap(t.role)} team` : 'The team') : t.staff }, grey = stoppedBefore(t);
+      return `<div class="wk fail${grey ? ' cut' : ''}" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${t.finished ? when(t.finished) : ''}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="why">${grey ? 'Not started: the task before it was stopped.' : esc(t.why)}</span></div><div class="wkb"><button class="btn sm ok" data-rerun="${esc(t.id)}">Run again</button><button class="btn sm" data-dismiss="${esc(t.id)}">Dismiss</button></div></div>`;
+    }).join('')}` : ''}${cut.length ? `<div class="wkcut">Stopped by a restart</div>${cut.map((t) => {
       const p = personOf(t.staff) || { name: t.staff };
       return `<div class="wk cut">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${t.finished ? when(t.finished) : ''}</span></div><div class="ti">${esc(t.title || t.id)}</div></div><div class="wkb"><button class="btn sm ok" data-rerun="${esc(t.id)}">Run again</button><button class="btn sm" data-dismiss="${esc(t.id)}">Dismiss</button></div></div>`;
     }).join('')}` : ''}</div>` : ''));
@@ -971,8 +1054,12 @@ document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-rerun],[data-dismiss]'); if (!r) return;
   r.disabled = true;
   const id = r.dataset.rerun || r.dataset.dismiss;
+  const hide = () => { S.interrupted = (S.interrupted || []).filter((t) => t.id !== id); S.failed = (S.failed || []).filter((t) => t.id !== id); renderWork(); };
   api(`tasks/${encodeURIComponent(id)}/${r.dataset.rerun ? 'rerun' : 'dismiss'}`, 'POST')
-    .then(() => { S.interrupted = (S.interrupted || []).filter((t) => t.id !== id); renderWork(); toast(r.dataset.rerun ? 'Started again' : 'Dismissed'); }, (er) => { r.disabled = false; toast(er.message, true); });
+    .then(() => {
+      if (r.dataset.dismiss && (S.failed || []).some((t) => t.id === id)) { gone = [...gone.slice(-199), id]; try { localStorage.setItem(FKEY, JSON.stringify(gone)); } catch { /* this tab only */ } }
+      hide(); toast(r.dataset.rerun ? 'Started again' : 'Dismissed');
+    }, (er) => { r.disabled = false; toast(er.message, true); });
 });
 setInterval(() => { if ($('#work') && !$('#work').hidden) renderWork(); renderUsage(); }, 30000);
 
@@ -1005,7 +1092,7 @@ function renderUsage() {
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-work],#stat');
   if (!t) { if (workPop && !e.target.closest('#work')) { workPop = false; renderWork(); } return; }
-  if (!(S.tasks || []).length && !(S.interrupted || []).length) { toast('Nobody is working on a task right now'); return; }
+  if (![S.tasks, S.interrupted, S.waiting, S.failed].some((x) => (x || []).length)) { toast('Nobody is working on a task right now'); return; }
   const want = t.id === 'stat' ? 'toggle' : t.dataset.work;
   if (S.view === 'office') workMin = want === 'open' ? false : !workMin;
   else workPop = want === 'open' ? true : want === 'close' ? false : !workPop;
@@ -1023,8 +1110,16 @@ document.addEventListener('click', (e) => {
   if (t.dataset.chat) { const id = t.dataset.chat; if (V.open[0] === id && !V.min.includes(id)) closeChat(id); else openChat(id); }
   else if (t.dataset.close) { e.stopPropagation(); closeChat(t.dataset.close); }
   else if (t.dataset.min) { e.stopPropagation(); toggleMin(t.dataset.min); }
-  else if (t.dataset.stop) api(`chat/${t.dataset.stop}/stop`, 'POST').catch((er) => toast(er.message, true));
-  else if (t.dataset.stoptask) api(`tasks/${encodeURIComponent(t.dataset.stoptask)}/stop`, 'POST').then(() => { S.waiting = (S.waiting || []).filter((x) => x.id !== t.dataset.stoptask); renderWork(); toast('Task stopped'); }, (er) => toast(er.message, true));
+  else if (t.dataset.stop) { t.disabled = true; api(`chat/${t.dataset.stop}/stop`, 'POST').catch((er) => { t.disabled = false; toast(er.message, true); }); }
+  else if (t.dataset.stoptask) {
+    const id = t.dataset.stoptask, n = downstream(id);
+    if (n && !confirm(`Stop this task? ${n} ${n === 1 ? 'task is' : 'tasks are'} waiting for this one and will be cancelled.`)) return;
+    t.disabled = true; // one click, one stop
+    api(`tasks/${encodeURIComponent(id)}/stop`, 'POST').then((r) => {
+      if (!r.ok) { t.disabled = false; toast('This task already ended.'); return; }
+      S.waiting = (S.waiting || []).filter((x) => x.id !== id); renderWork(); toast('Task stopped');
+    }, (er) => { t.disabled = false; toast(er.message, true); });
+  }
   else if (t.dataset.newchat) { e.stopPropagation(); api(`chat/${t.dataset.newchat}/new`, 'POST').then(() => toast('New conversation started'), (er) => toast(er.message, true)); }
   else if (t.hasAttribute('data-copy')) {
     const code = t.parentElement.querySelector('code').textContent;
@@ -1037,6 +1132,10 @@ window.addEventListener('resize', () => renderChats());
 
 // ------------------------------------------------------------------ events
 document.addEventListener('click', (e) => {
+  const r = e.target.closest('[data-review]');
+  if (r && !e.target.closest('[data-stoptask]')) openOkAt(r.dataset.review);
+});
+document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-go],[data-oktoggle],#okStat,[data-ok]');
   if (!t) return;
   if (t.dataset.go) go(t.dataset.go);
@@ -1048,9 +1147,9 @@ document.addEventListener('click', (e) => {
   }
   else if (t.dataset.ok) {
     t.disabled = true;
-    const note = (t.closest('.oki') && t.closest('.oki').querySelector('[data-note]') || {}).value || ''; // plan items: a note sends it back for a new plan
+    const note = t.dataset.d === 'rejected' ? notes[t.dataset.ok] || '' : ''; // plan items: a note sends it back for a new plan
     act(() => api(`approvals/${encodeURIComponent(t.dataset.ok)}/decide`, 'POST', { decision: t.dataset.d, ...(note.trim() ? { note: note.trim() } : {}) }), t.dataset.d === 'approved' ? 'Approved. The staff will see it.' : note.trim() ? 'Sent back for a new plan.' : 'Rejected.')
-      .then(() => refresh(['approvals']), () => { t.disabled = false; });
+      .then(() => { delete notes[t.dataset.ok]; return refresh(['approvals']); }, () => { t.disabled = false; });
   }
 });
 window.addEventListener('hashchange', () => go(location.hash.slice(1)));
@@ -1092,7 +1191,7 @@ function live() {
   });
   es.addEventListener('doctools', (e) => { S.doctools = JSON.parse(e.data); const l = $('.dtline'); if (l) l.outerHTML = docToolsLine(); }); // in place: keeps unsaved edits
   es.addEventListener('usage', (e) => { S.usage = JSON.parse(e.data); renderUsage(); });
-  es.addEventListener('tasks', (e) => { const act = JSON.parse(e.data); api('tasks').then((r) => { S.tasks = r.active.map((a) => ({ ...a, ...(r.list.find((t) => t.id === a.id) || {}) })); S.waiting = waitingOf(r.list); S.interrupted = r.interrupted || []; renderChats(); }).catch(() => {}); S.tasks = act; renderChats(); });
+  es.addEventListener('tasks', (e) => { const act = JSON.parse(e.data); loadTasks().then(renderChats, (er) => console.warn('Could not refresh tasks:', er)); S.tasks = act; renderChats(); });
   es.addEventListener('chatlive', (e) => { const { id, step, text } = JSON.parse(e.data); const c = chatOf(id); c.live = { step, text }; if (c.running && !c.since) c.since = Date.now(); renderLive(id); });
   es.addEventListener('taskstep', (e) => {
     const x = JSON.parse(e.data);
@@ -1103,8 +1202,9 @@ function live() {
   es.addEventListener('chatstate', (e) => { const { id, running } = JSON.parse(e.data); const c = chatOf(id); c.running = running; c.since = running ? (c.since || Date.now()) : null; if (!running) c.live = null; renderChats(); });
   es.addEventListener('changed', (e) => {
     const areas = JSON.parse(e.data).map((a) => (a === 'office' ? ['office', 'staff'] : a === 'staff' ? ['staff', 'office'] : [a])).flat();
-    if (areas.includes('tasks')) api('tasks').then((r) => { S.waiting = waitingOf(r.list); renderWork(); }).catch(() => {}); // a task file came or changed: tasks that wait for others
-    refresh([...new Set(areas)].filter((a) => a !== 'events')).catch(() => {});
+    if (areas.includes('tasks')) loadTasks().then(renderChats, (er) => console.warn('Could not refresh tasks:', er)); // a task file came or changed: waiting, failed
+    const rest = [...new Set(areas)].filter((a) => !['events', 'tasks', 'mail'].includes(a));
+    if (rest.length) refresh(rest).catch((er) => console.warn('Could not refresh the dashboard:', er));
   });
   es.onopen = () => { fails = 0; if (bar) { bar.remove(); bar = null; load().then(render); } };
   es.onerror = () => {
@@ -1115,10 +1215,7 @@ function live() {
 (async () => {
   try { await load(); S.status = await api('status'); S.presets = await api('presets'); S.usage = await api('usage').catch(() => null); S.linked = await api('linked').catch(() => []); S.run = await api('run').catch(() => null); S.doctools = await api('doctools').catch(() => null); } catch (e) { document.body.innerHTML = `<div class="empty"><b>Cannot load the office</b>${esc(e.message)}</div>`; return; }
   const run = await api('chats').catch(() => ({ running: [] }));
-  const tk = await api('tasks').catch(() => ({ active: [], list: [] }));
-  S.tasks = tk.active.map((a) => ({ ...a, ...(tk.list.find((t) => t.id === a.id) || {}) }));
-  S.waiting = waitingOf(tk.list);
-  S.interrupted = tk.interrupted || [];
+  applyTasks(await api('tasks').catch(() => ({ active: [], list: [] })));
   run.running.forEach((id) => { chatOf(id).running = true; });
   go(location.hash.slice(1) || 'office');
   await Promise.all(V.open.map(async (id) => { if (!personOf(id)) return; const h = await api(`chat/${id}`).catch(() => null); if (h) Object.assign(chatOf(id), { messages: h.messages, running: h.running, loaded: true }); }));
