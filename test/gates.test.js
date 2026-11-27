@@ -148,7 +148,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     await until(() => tasks.list().some((t) => t.idle === 'yes' && t.status === 'done'));
     const made = tasks.list().filter((t) => t.idle === 'yes');
     assert.strictEqual(made.length, 1);
-    assert.deepStrictEqual([made[0].staff, made[0].from, made[0].task], ['siti', 'pa', 'Tidy the inbox']);
+    assert.deepStrictEqual([made[0].staff, made[0].from, made[0].task], ['siti', 'office', 'Tidy the inbox'], 'idle-made work is from the office (S6)');
     const x = seen('staff-idle.js').find((y) => y.lastTask.id === 'g8');
     assert.strictEqual(x.lastTask.status, 'done'); assert.strictEqual(x.lastTask.result, 'Done: Count the shirts');
     unhook('staff-idle.js');

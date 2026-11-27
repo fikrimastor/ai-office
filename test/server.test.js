@@ -27,7 +27,9 @@ const read = (...p) => fs.readFileSync(path.join(dir, ...p), 'utf8');
 let port;
 function req(method, url, body, headers = {}) {
   return new Promise((resolve, reject) => {
-    const r = http.request({ host: '127.0.0.1', port, method, path: url, headers: { host: `localhost:${port}`, 'x-office-key': cfg.key, ...headers } }, (res) => {
+    // like the dashboard page: a browser sends its Origin (pass origin: undefined to leave it out, as a script would)
+    const h = Object.fromEntries(Object.entries({ host: `localhost:${port}`, 'x-office-key': cfg.key, origin: `http://localhost:${port}`, ...headers }).filter(([, v]) => v !== undefined));
+    const r = http.request({ host: '127.0.0.1', port, method, path: url, headers: h }, (res) => {
       let s = ''; res.on('data', (d) => { s += d; });
       res.on('end', () => { let j = s; try { j = JSON.parse(s); } catch { /* html */ } resolve({ status: res.statusCode, body: j }); });
     });

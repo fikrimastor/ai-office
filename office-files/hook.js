@@ -23,6 +23,7 @@ process.stdin.on('end', () => {
     file: input.file_path,
     msg: cut(input.message || h.last_assistant_message || h.message || h.prompt),
     cwd: h.cwd,
+    who: process.env.AI_OFFICE_STAFF, // which office run (pa or a staff id): the office uses it to check who wrote a message
   };
   for (const k of Object.keys(line)) if (line[k] == null || line[k] === '') delete line[k];
   fs.appendFileSync(path.join(__dirname, 'events.jsonl'), JSON.stringify(line) + '\n');

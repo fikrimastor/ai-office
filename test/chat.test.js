@@ -136,6 +136,19 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
     assert.match(access(dir, 'siti', { task: true }).note, /cannot ask colleagues from here/);
   });
 
+  await test('S1 staff cannot read the office key or the boss\'s OKs; the manager can; doc tools stay readable', async () => {
+    const { access } = require('../lib/chat');
+    const { rulePath } = require('../lib/templates');
+    const r = rulePath(path.resolve(dir)).replace(/\/+$/, '');
+    for (const opts of [{}, { task: true }]) {
+      const d = access(dir, 'siti', opts).denied;
+      for (const x of [`Read(${r}/office.json)`, `Read(${r}/.office/*.json)`, `Read(${r}/.office/chats/**)`, `Read(${r}/.office/hooks/**)`]) assert.ok(d.includes(x), x);
+      assert.ok(!d.some((x) => x.startsWith('Read(') && /doc-tools|\.office\/\*\*/.test(x)), 'doc-tools README stays readable');
+      assert.ok(d.includes(`Edit(${r}/.office/**)`));
+    }
+    assert.ok(!access(dir, 'pa').denied.some((x) => x.startsWith('Read(')), 'the manager may read them');
+  });
+
   await test('a linked folder is the only extra place a chat can reach', async () => {
     const ext = path.join(tmp, 'linked site'); fs.mkdirSync(ext);
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'office.json'), 'utf8'));

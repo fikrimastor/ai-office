@@ -90,7 +90,7 @@ const test = async (name, fn) => { await fn(); n++; console.log(`ok ${n} ${name}
 
   await test('two pool tasks never claim the same staff at once', async () => {
     put('p4', 'staff: any\nrole: sales\n', 'LONG sales one');
-    put('p5', 'staff:\nrole: sales\n', 'LONG sales two');
+    put('p5', 'staff: Any\nrole: sales\n', 'LONG sales two');
     put('p6', 'staff: any\nrole: finance\n', 'invoice one');
     put('p7', 'staff: any\nrole: finance\n', 'invoice two');
     tasks.scan();
