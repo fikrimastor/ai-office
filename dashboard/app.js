@@ -926,8 +926,10 @@ let workMin = false, workPop = false;
 try { workMin = localStorage.getItem(WKEY) === '1'; } catch { /* private window: start open */ }
 const nameOfStaff = (id) => (personOf(id) || { name: id }).name;
 // tasks that wait for other tasks (after:), with what they wait for: "Waiting for Siti" or the task's title
-const waitingOf = (list = []) => list.filter((t) => t.waiting || t.status === 'plan-ready').map((t) => {
+// pool tasks (staff: any) wait for whoever is free first: "Waiting for a free Sales"
+const waitingOf = (list = []) => list.filter((t) => t.waiting || t.pool || t.status === 'plan-ready').map((t) => {
   if (t.status === 'plan-ready') return { ...t, waitFor: 'your OK on the plan' };
+  if (t.pool && !t.waiting) return { ...t, waitFor: t.role ? `a free ${t.role}` : 'anyone free' };
   const d = (t.after || []).map((a) => list.find((x) => x.id === a)).find((x) => x && x.status !== 'done');
   return { ...t, waitFor: d ? (d.status === 'working' ? nameOfStaff(d.staff) : d.title || d.id) : '' };
 });
@@ -958,8 +960,8 @@ function renderWork() {
       const p = personOf(t.staff) || { name: t.staff }, asked = t.from && t.from !== 'pa' && t.from !== t.staff ? personOf(t.from) : null;
       return `<div class="wk" data-task="${esc(t.id)}">${p.colour ? av(p) : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}${asked ? ` <span class="faint">(asked by ${esc(asked.name)})</span>` : ''}</div><span class="now">${t.status === 'planning' ? 'Planning: ' : ''}${esc(t.step || 'Starting')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${wait.map((t) => {
-      const p = personOf(t.staff) || { name: t.staff };
-      return `<div class="wk wait" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
+      const p = (!t.pool && personOf(t.staff)) || { name: t.pool ? t.role || 'Anyone' : t.staff };
+      return `<div class="wk wait${t.pool ? ' pool' : ''}" data-task="${esc(t.id)}">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${since(t.created)}</span></div><div class="ti">${esc(t.title || t.id)}</div><span class="now">Waiting for ${esc(t.waitFor || 'another task')}</span></div><button class="btn sm" data-stoptask="${esc(t.id)}">Stop</button></div>`;
     }).join('')}${cut.length ? `<div class="wkcut">Stopped by a restart</div>${cut.map((t) => {
       const p = personOf(t.staff) || { name: t.staff };
       return `<div class="wk cut">${p.colour ? av(p, 'grey') : ''}<div class="sq"><div class="l1"><b>${esc(p.name)}</b><span class="faint">${t.finished ? when(t.finished) : ''}</span></div><div class="ti">${esc(t.title || t.id)}</div></div><div class="wkb"><button class="btn sm ok" data-rerun="${esc(t.id)}">Run again</button><button class="btn sm" data-dismiss="${esc(t.id)}">Dismiss</button></div></div>`;
