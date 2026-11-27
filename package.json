@@ -20,6 +20,6 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/generate.test.js && node test/status.test.js && node test/guard.test.js && node test/addons.test.js && node test/chat.test.js && node test/tasks.test.js && node test/mail.test.js && node test/usage.test.js && node test/open.test.js && node test/markdown.test.mjs && node test/server.test.js && node test/office-layout.test.mjs"
+    "test": "node test/generate.test.js && node test/status.test.js && node test/guard.test.js && node test/addons.test.js && node test/chat.test.js && node test/tasks.test.js && node test/gates.test.js && node test/mail.test.js && node test/usage.test.js && node test/open.test.js && node test/markdown.test.mjs && node test/server.test.js && node test/office-layout.test.mjs"
   }
 }
